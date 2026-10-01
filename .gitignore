@@ -1,0 +1,6 @@
+# Cascade local secrets / init samples (never commit in this package tree)
+cascade.secrets.env
+cascade.project.yaml
+cascade.secrets.env.example
+cascade.secrets.md
+.github/
