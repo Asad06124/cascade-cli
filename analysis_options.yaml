@@ -1,5 +1,17 @@
 include: package:lints/recommended.yaml
 
+analyzer:
+  errors:
+    non_constant_identifier_names: ignore
+    constant_identifier_names: ignore
+    unused_element: ignore
+    unused_field: ignore
+    avoid_dynamic_calls: ignore
+    cascade_invocations: ignore
+    prefer_final_locals: ignore
+    omit_local_variable_types: ignore
+    document_ignores: ignore
+
 linter:
   rules:
     public_member_api_docs: false

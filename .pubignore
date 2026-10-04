@@ -1,18 +1,3 @@
-# Never publish sibling monorepo paths
-../../
-../../../
-
-# Tooling / secrets (defense in depth)
-.env
-.env.*
-*.pem
-*.jks
-*.keystore
-key.properties
-data/
-**/secrets/
-
-# Dart / IDE
 .dart_tool/
 .packages
 .pub-cache/
@@ -21,13 +6,9 @@ build/
 .idea/
 .vscode/
 *.iml
-
-# Docs that mention private monorepo layout (keep in git, omit from pub tarball)
-PUBLISH.md
-
-# Local sample / generated project files (not part of the CLI package)
-cascade.project.yaml
-cascade.secrets.env
-cascade.secrets.env.example
-cascade.secrets.md
-.github/
+pubspec.lock
+.gitignore
+.pubignore
+docs/
+../../
+../../../

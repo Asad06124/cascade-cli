@@ -1,6 +1,15 @@
+## 0.1.3
+
+- Expand pub.dev README: full usage guide and Support us section.
+
+## 0.1.2
+
+- Ignore dead localhost in saved config; fall back to production.
+
+## 0.1.1
+
+- Opaque client: login, init, doctor.
+
 ## 0.1.0
 
-- Initial public CLI (`cascade_cli` on pub.dev; binary `cascade`): `login`, `init`, `doctor`.
-- Thin client only; sealed workflow is fetched from the Cascade control plane.
-- `cascade login` auto-detects a local control plane; project YAML is `project_key` only.
-- Init writes secrets template + `gh` guide; doctor verifies GitHub secrets.
+- Initial release.
