@@ -1,9 +1,10 @@
 name: cascade_cli
 description: >
-  Official Cascade CLI for cascadeci.com — login, init, doctor.
+  Official Cascade CLI for cascadeci.com — login, logout, init, match, doctor.
   Sealed Flutter CI client; see README for usage and how to support the project.
-version: 0.1.3
+version: 0.1.17
 homepage: https://cascadeci.com
+documentation: https://cascadeci.com/guide
 repository: https://github.com/Asad06124/cascade-cli
 issue_tracker: https://github.com/Asad06124/cascade-cli/issues
 
@@ -15,6 +16,7 @@ executables:
 
 dependencies:
   args: ^2.7.0
+  crypto: ^3.0.6
   http: ^1.3.0
   path: ^1.9.1
 

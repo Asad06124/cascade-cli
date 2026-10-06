@@ -1,13 +1,33 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:args/args.dart';
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as h;
 import 'package:path/path.dart' as q;
 
 part '_v.dart';
 
-String $(int i) => _V._(i);
+const cliVersion = '0.1.17';
+const supportedWorkflowVersion = '2.2.0';
+String workflowChecksum(String contents) {
+  final normalized = contents
+      .replaceAll('\r\n', '\n')
+      .replaceFirst(RegExp(r'_Σ:\s*".*"'), '_Σ: "__SEAL__"')
+      .trim();
+  return sha256.convert(utf8.encode('$normalized\n')).toString();
+}
+
+String $(int i) => _V
+    ._(i)
+    .replaceAll('✅', 'OK')
+    .replaceAll('⚠️', 'WARN')
+    .replaceAll('❌', 'ERROR')
+    .replaceAll('→', '->')
+    .replaceAll('←', '<-')
+    .replaceAll('…', '...');
 
 class Z {
   static Future<void> go(List<String> a0) async {
@@ -16,7 +36,12 @@ class Z {
       ..addOption($(77))
       ..addFlag($(78), negatable: false)
       ..addFlag($(79), negatable: false)
-      ..addOption($(28));
+      ..addOption($(28))
+      ..addFlag("version", negatable: false)
+      ..addFlag("ios", negatable: false)
+      ..addOption("file")
+      ..addOption("app")
+      ..addOption("to");
     late ArgResults a2;
     try {
       a2 = a1.parse(a0);
@@ -26,13 +51,19 @@ class Z {
       exitCode = 64;
       return;
     }
+    if (a2['version'] == true ||
+        (a2.rest.isNotEmpty && a2.rest.first == 'version')) {
+      stdout
+          .writeln('cascade $cliVersion (workflow $supportedWorkflowVersion)');
+      return;
+    }
     if (a2[$(76)] == true || a2.rest.isEmpty) {
       _u(a1);
       return;
     }
     final a4 = a2.rest.first;
     final a5 = a2.rest.skip(1).toList();
-    final a6 = await _A.x(y: a2[$(77)] as String?);
+    late _A a6;
     final a7 = <String>[
       if (a2[$(78)] == true) $(73),
       if (a2[$(79)] == true) $(74),
@@ -40,8 +71,15 @@ class Z {
       ...a5,
     ];
     try {
+      a6 = await _A.x(y: a2[$(77)] as String?);
       if (a4 == $(70)) {
         await _B(a6).x();
+      } else if (a4 == $(230)) {
+        _H.x();
+      } else if (a4 == $(234) || a4 == $(235) || a4 == $(253)) {
+        await _I.x([...a5, if (a2["ios"] == true) "--ios"]);
+      } else if (a4 == "send") {
+        await _sendLocalApk(a6, a2);
       } else if (a4 == $(71)) {
         await _C(a6).x(a7);
       } else if (a4 == $(72)) {
@@ -58,10 +96,30 @@ class Z {
     } on _F catch (a9) {
       stderr.writeln('${$(216)}${a9.a}');
       exitCode = 1;
+    } on TimeoutException {
+      stderr.writeln(
+          'ERROR Server timed out. Check your connection and --api endpoint, then retry.');
+      exitCode = 1;
+    } on SocketException {
+      stderr.writeln(
+          'ERROR Server unavailable. Check your connection and --api endpoint, then retry.');
+      exitCode = 1;
+    } on h.ClientException {
+      stderr.writeln(
+          'ERROR Server unavailable. Check your connection and --api endpoint, then retry.');
+      exitCode = 1;
+    } catch (_) {
+      stderr.writeln(
+          'ERROR Operation failed. Check login, project setup and server compatibility; run cascade doctor.');
+      exitCode = 1;
     }
   }
 
   static void _u(ArgParser a0) {
+    stdout.writeln(
+        "cascade match: upload filled secrets; --ios explicitly provisions Apple signing.\ncascade send --app APP_ID --file app-release.apk --to you@example.com: email a local APK link.");
+    stdout.writeln(
+        'cascade --version: show package and supported workflow versions.');
     stdout.write($(115));
     stdout.writeln(a0.usage);
     stdout.write($(200));
@@ -118,9 +176,8 @@ class _A {
     if (w != null && w.trim().isNotEmpty) {
       final a0 = w.trim();
       if (!_lb(a0)) return a0;
-      if (await _p()) return a0;
+      // Local endpoints require an explicit --api or CASCADE_API_URL override.
     }
-    if (await _p()) return $(1);
     return $(0);
   }
 
@@ -130,22 +187,6 @@ class _A {
         a1.contains($(104)) ||
         a1.contains($(105)) ||
         a1.contains($(106));
-  }
-
-  static Future<bool> _p() async {
-    try {
-      final a0 = h.Client();
-      try {
-        final a1 = await a0
-            .get(Uri.parse($(1)))
-            .timeout(const Duration(milliseconds: 400));
-        return a1.statusCode > 0 && a1.statusCode < 600;
-      } finally {
-        a0.close();
-      }
-    } catch (_) {
-      return false;
-    }
   }
 
   void y() {
@@ -158,6 +199,14 @@ class _A {
             if (d != null) $(12): d,
           })}\n',
     );
+  }
+
+  /// Clears saved CLI credentials (logout / switch account).
+  static bool z() {
+    final a0 = File(f);
+    if (!a0.existsSync()) return false;
+    a0.deleteSync();
+    return true;
   }
 
   static String _s(String a0) =>
@@ -182,9 +231,11 @@ class _G {
     late h.Response a5;
     final a6 = a0.toUpperCase();
     if (a6 == $(80)) {
-      a5 = await h.get(a3, headers: a4);
+      a5 = await h.get(a3, headers: a4).timeout(const Duration(seconds: 30));
     } else if (a6 == $(81)) {
-      a5 = await h.post(a3, headers: a4, body: a2 == null ? null : jsonEncode(a2));
+      a5 = await h
+          .post(a3, headers: a4, body: a2 == null ? null : jsonEncode(a2))
+          .timeout(const Duration(seconds: 30));
     } else {
       throw _F('${$(198)}$a0');
     }
@@ -197,7 +248,13 @@ class _G {
     }
     if (a5.statusCode < 200 || a5.statusCode >= 300) {
       throw _E(
-        (a7[$(39)] as String?) ?? '${$(199)}${a5.statusCode}',
+        a5.statusCode == 401 || a5.statusCode == 403
+            ? 'Login expired or account access unavailable. Run cascade login and check your dashboard.'
+            : a5.statusCode == 404
+                ? 'App/project not found. Run cascade init --pick with the correct account.'
+                : a5.statusCode >= 500
+                    ? 'Server unavailable. Check connectivity and retry.'
+                    : 'Request rejected. Check App/project identity, repository access and CLI/server compatibility; run cascade doctor.',
         b: a7[$(40)] as String?,
       );
     }
@@ -207,6 +264,354 @@ class _G {
   Future<Map<String, dynamic>> y(String a0) => x($(80), a0);
   Future<Map<String, dynamic>> z(String a0, [Map<String, dynamic>? a1]) =>
       x($(81), a0, a2: a1);
+}
+
+class _H {
+  static void x() {
+    if (_A.z()) {
+      stdout.writeln('${$(231)}${_A.f}');
+      stdout.writeln($(232));
+    } else {
+      stdout.writeln($(233));
+    }
+  }
+}
+
+/// Push filled release secrets to GitHub; Apple signing requires explicit --ios.
+class _I {
+  static Future<void> x(List<String> a0) async {
+    stdout.writeln($(242));
+    final a1 = Directory.current.path;
+    final a2 = File(q.join(a1, $(60)));
+    if (!a2.existsSync()) throw _F($(243));
+    if (!_hasGh()) throw _F($(249));
+
+    var a3 = _parseEnvMultiline(a2.readAsStringSync());
+    final a4 = a3[$(236)]?.trim() ?? '';
+    final a5 = a3[$(237)]?.trim() ?? '';
+    var a6 = a3[$(238)]?.trim() ?? '';
+    final bAll = a4.isNotEmpty && a5.isNotEmpty && a6.isNotEmpty;
+    final setupIos = a0.contains("--ios");
+    // Push existing credentials before optional Apple provisioning, so it cannot block Android setup.
+    await _pushSecrets(a1, a3);
+    if (setupIos && !bAll) {
+      final a7 = <String>[
+        if (a4.isEmpty) $(236),
+        if (a5.isEmpty) $(237),
+        if (a6.isEmpty) $(238),
+      ];
+      throw _F('${$(244)}${a7.join(', ')}${$(245)}');
+    }
+
+    if (setupIos && bAll) {
+      a6 = _keyBody(a1, a6);
+      if (!a6.contains('BEGIN PRIVATE KEY') ||
+          !a6.contains('END PRIVATE KEY')) {
+        throw _F($(304));
+      }
+      if (a6.contains('…') || a6.contains('...')) {
+        throw _F($(304));
+      }
+
+      final a8 = q.join(a1, $(240));
+      if (!Directory(a8).existsSync()) throw _F($(246));
+      if (!_hasFastlane()) throw _F($(247));
+
+      final a9 = _i(a1);
+      if (a9 == null || a9.isEmpty) throw _F($(288));
+
+      final b0 = await _certsUrl(a1);
+      a3['MATCH_GIT_URL'] = b0;
+      stdout.writeln('${$(264)}$b0');
+      _writeMatchfile(a8, b0, a9);
+      stdout.write($(265));
+
+      final b1 = _ensurePassword(a2, a3);
+      stdout.write($(266));
+      final b2 = await _ensureGitAuth(a2, a3);
+      stdout.write($(267));
+
+      final b6 = q.join(Directory.systemTemp.path, $(302));
+      File(b6).writeAsStringSync(a6.endsWith('\n') ? a6 : '$a6\n');
+      final bOk = _pemOk(b6);
+      if (bOk == false) {
+        try {
+          File(b6).deleteSync();
+        } catch (_) {}
+        throw _F($(304));
+      }
+      stdout.writeln($(309));
+
+      stdout.writeln($(248));
+      final b3 = Map<String, String>.from(Platform.environment)
+        ..remove($(238))
+        ..remove($(239))
+        ..[$(236)] = a4
+        ..[$(237)] = a5
+        ..[$(254)] = b1
+        ..[$(255)] = b2
+        ..[$(256)] = b2
+        ..[$(285)] = $(287)
+        ..[$(286)] = $(287)
+        ..[$(301)] = b6;
+
+      final b7 = q.join(a8, $(298));
+      Directory(b7).createSync(recursive: true);
+      final b8 = File(q.join(b7, $(299)));
+      final b9 = b8.existsSync() ? b8.readAsStringSync() : '';
+      if (!b9.contains($(300))) {
+        b8.writeAsStringSync(
+          '$b9${b9.isEmpty || b9.endsWith('\n') ? '' : '\n'}${$(303)}',
+        );
+      }
+
+      final b4 = await Process.run(
+        $(235),
+        [$(300)],
+        workingDirectory: a8,
+        environment: b3,
+      );
+      try {
+        File(b6).deleteSync();
+      } catch (_) {}
+      if (b4.exitCode != 0) {
+        final out = '${b4.stdout}\n${b4.stderr}'.toLowerCase();
+        if (out.contains('invalid curve') ||
+            out.contains('openssl::pkey') ||
+            out.contains('pkeyerror') ||
+            out.contains('could not parse') ||
+            out.contains('private key')) {
+          throw _F($(310));
+        }
+        throw _F($(311));
+      }
+      stdout.writeln($(252));
+    } else {
+      stdout.write($(318));
+    }
+
+    final matchUrl = a3["MATCH_GIT_URL"];
+    a3 = _parseEnvMultiline(a2.readAsStringSync());
+    if (matchUrl != null) a3["MATCH_GIT_URL"] = matchUrl;
+    if (setupIos) await _pushSecrets(a1, a3);
+  }
+
+  static Future<void> _pushSecrets(String a0, Map<String, String> a1) async {
+    final a2 = File(q.join(a0, $(314)));
+    if (!a2.existsSync()) throw _F($(319));
+    stdout.write($(315));
+    final a3 = RegExp(r'gh secret set (\S+) --body "\$([A-Z0-9_]+)"');
+    var a4 = 0;
+    final failed = <String>[];
+    for (final a5 in a3.allMatches(a2.readAsStringSync())) {
+      final a6 = a5.group(1)!;
+      final a7 = a5.group(2)!;
+      var a8 = a1[a7]?.trim() ?? '';
+      if (a8.isEmpty) continue;
+      if (a7 == $(238)) a8 = _keyBody(a0, a8);
+      final process = await Process.start('gh', ['secret', 'set', a6],
+          workingDirectory: a0);
+      final output = process.stdout.drain<void>();
+      final errors = process.stderr.drain<void>();
+      process.stdin.write(a8);
+      await process.stdin.close();
+      final status = await process.exitCode;
+      await Future.wait([output, errors]);
+      if (status != 0) {
+        failed.add(a7);
+        continue;
+      }
+      stdout.writeln('${$(316)}$a7');
+      a4++;
+    }
+    if (failed.isNotEmpty) {
+      throw _F(
+          "Some secrets failed to upload: ${failed.join(', ')}. Other uploads were attempted; fix gh authentication/permissions and rerun.");
+    }
+    if (a4 == 0) {
+      stdout.write($(321));
+    }
+    stdout.writeln($(317));
+  }
+
+  static bool _hasFastlane() {
+    try {
+      return Process.runSync($(235), ['--version']).exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static bool _hasGh() {
+    try {
+      return Process.runSync($(211), [$(280), $(281)]).exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<String> _ghLogin() async {
+    final a0 = await Process.run($(211), [$(276), $(277), $(278), $(279)]);
+    final a1 = (a0.stdout as String).trim();
+    if (a0.exitCode != 0 || a1.isEmpty) throw _F($(268));
+    return a1;
+  }
+
+  static Future<String> _ghToken() async {
+    final a0 = await Process.run($(211), [$(280), $(281)]);
+    final a1 = (a0.stdout as String).trim();
+    if (a0.exitCode != 0 || a1.isEmpty) throw _F($(249));
+    return a1;
+  }
+
+  static Future<String> _certsUrl(String a0) async {
+    final a1 = File(q.join(a0, $(240), $(241)));
+    if (a1.existsSync()) {
+      final a2 =
+          RegExp(r'git_url\("([^"]+)"\)').firstMatch(a1.readAsStringSync());
+      if (a2 != null) return a2.group(1)!;
+    }
+    final a3 = await _ghLogin();
+    final a4 =
+        (_n(a0) ?? $(69)).toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+    final a5 = '$a3/${$(282)}$a4'.replaceAll(RegExp(r'-+'), '-');
+    final a6 = '${$(283)}$a5${$(284)}';
+    final a7 = await Process.run($(211), [$(270), $(275), a5]);
+    if (a7.exitCode != 0) {
+      final a8 = await Process.run($(211), [
+        $(270),
+        $(271),
+        a5,
+        $(272),
+        $(273),
+        $(274),
+      ]);
+      if (a8.exitCode != 0) {
+        throw _F('${$(269)}: ${(a8.stderr as String).trim()}');
+      }
+    }
+    return a6;
+  }
+
+  static void _writeMatchfile(String a0, String a1, String a2) {
+    File(q.join(a0, $(241)))
+        .writeAsStringSync('${$(289)}$a1${$(290)}$a2${$(291)}');
+  }
+
+  static String _ensurePassword(File a0, Map<String, String> a1) {
+    final a2 = a1[$(254)]?.trim() ?? '';
+    if (a2.isNotEmpty) return a2;
+    final a3 = Random.secure();
+    final a4 = List<int>.generate(24, (_) => a3.nextInt(256));
+    final a5 = base64UrlEncode(a4).replaceAll('=', '');
+    _upsertEnv(a0, $(254), a5);
+    return a5;
+  }
+
+  static Future<String> _ensureGitAuth(File a0, Map<String, String> a1) async {
+    final a2 = a1[$(255)]?.trim() ?? '';
+    if (a2.isNotEmpty) return a2;
+    final a3 = await _ghToken();
+    final a4 = base64Encode(utf8.encode('${$(292)}$a3'));
+    _upsertEnv(a0, $(255), a4);
+    return a4;
+  }
+
+  static void _upsertEnv(File a0, String a1, String a2) {
+    final a3 = a0.readAsStringSync();
+    final a4 = RegExp('^${RegExp.escape(a1)}=.*\$', multiLine: true);
+    final a5 = '$a1=$a2';
+    if (a4.hasMatch(a3)) {
+      a0.writeAsStringSync(a3.replaceFirst(a4, a5));
+    } else {
+      final a6 = a3.endsWith('\n') ? a3 : '$a3\n';
+      a0.writeAsStringSync('$a6\n# auto by cascade match\n$a5\n');
+    }
+  }
+
+  /// `true` valid, `false` invalid, `null` openssl unavailable (skip early check).
+  static bool? _pemOk(String a0) {
+    try {
+      final a1 = Process.runSync($(305), [$(306), $(307), a0, $(308)]);
+      return a1.exitCode == 0;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String _keyBody(String a0, String a1) {
+    var a2 = a1.trim();
+    while ((a2.startsWith('"') && a2.endsWith('"') && a2.length > 1) ||
+        (a2.startsWith("'") && a2.endsWith("'") && a2.length > 1)) {
+      a2 = a2.substring(1, a2.length - 1).trim();
+    }
+    a2 = a2
+        .replaceAll(r'\\n', '\n')
+        .replaceAll(r'\n', '\n')
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .trim();
+    if (!a2.contains('BEGIN PRIVATE KEY')) {
+      final a3 = a2.startsWith('/') || a2.startsWith('~')
+          ? a2.replaceFirst('~', Platform.environment[$(3)] ?? '')
+          : q.join(a0, a2);
+      final a4 = File(a3);
+      if (a4.existsSync()) {
+        a2 = a4.readAsStringSync().trim();
+      }
+    }
+    if (a2.contains('BEGIN PRIVATE KEY') && !a2.contains('\n')) {
+      a2 = a2
+          .replaceFirst(
+              '-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
+          .replaceFirst(
+              '-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----');
+    }
+    if (!a2.endsWith('\n')) a2 = '$a2\n';
+    return a2;
+  }
+
+  static Map<String, String> _env(File a0) {
+    final a1 = <String, String>{};
+    final a2 = a0.readAsStringSync().split('\n');
+    String? a3;
+    final a4 = StringBuffer();
+    for (final a5 in a2) {
+      if (a3 != null) {
+        a4.writeln(a5);
+        if (a5.trim().endsWith('"') || a5.trim().endsWith("'")) {
+          var a6 = a4.toString().trim();
+          if ((a6.startsWith('"') && a6.endsWith('"')) ||
+              (a6.startsWith("'") && a6.endsWith("'"))) {
+            a6 = a6.substring(1, a6.length - 1);
+          }
+          a1[a3] = a6;
+          a3 = null;
+          a4.clear();
+        }
+        continue;
+      }
+      final a7 = a5.trim();
+      if (a7.isEmpty || a7.startsWith('#')) continue;
+      final a8 = a7.indexOf('=');
+      if (a8 <= 0) continue;
+      final a9 = a7.substring(0, a8).trim();
+      var b0 = a7.substring(a8 + 1).trim();
+      if ((b0.startsWith('"') && !b0.endsWith('"')) ||
+          (b0.startsWith("'") && !b0.endsWith("'"))) {
+        a3 = a9;
+        a4.write(b0);
+        a4.writeln();
+        continue;
+      }
+      if ((b0.startsWith('"') && b0.endsWith('"')) ||
+          (b0.startsWith("'") && b0.endsWith("'"))) {
+        b0 = b0.substring(1, b0.length - 1);
+      }
+      if (a9.isNotEmpty && b0.isNotEmpty) a1[a9] = b0;
+    }
+    return a1;
+  }
 }
 
 class _B {
@@ -310,24 +715,73 @@ class _C {
       if (b1 != null) stdout.writeln('${$(122)}$b1');
       if (b2 != null) stdout.writeln('${$(123)}$b2');
     }
+    final binding = await _repositoryBinding();
     final b3 = await a7.z($(22), {
-      if (a8 != null)
-        $(49): a8
-      else if (a9 != null)
-        $(50): a9
-      else ...{
-        $(28): b0,
-        if (b1 != null) $(51): b1,
-        if (b2 != null) $(52): b2,
-      },
+      "repositoryTrust": binding,
+      "refreshWorkflowSupported": true,
+      if (a8 != null) $(49): a8,
+      if (a9 != null) $(50): a9,
+      $(28): b0,
+      if (b1 != null) $(51): b1,
+      if (b2 != null) $(52): b2,
     });
     final b4 = b3[$(41)] as Map<String, dynamic>;
     final b5 = b3[$(42)] as Map<String, dynamic>;
+    final refresh = b3['refreshWorkflowFile'];
+    if (b4['path'] != 'cascade.project.yaml' ||
+        b5['path'] != '.github/workflows/cascade.yml' ||
+        b5['version'] != supportedWorkflowVersion ||
+        b5['checksum'] != workflowChecksum((b5['contents'] as String?) ?? '') ||
+        refresh is! Map ||
+        refresh['path'] != '.github/workflows/cascade-refresh.yml' ||
+        refresh['contents'] is! String ||
+        b4['contents'] is! String ||
+        !((b5['contents'] as String?) ?? '')
+            .contains('_Σ: "${b5['checksum']}"') ||
+        !((b5['contents'] as String?) ?? '')
+            .contains('_λ: "$supportedWorkflowVersion"') ||
+        !((b5['contents'] as String?) ?? '').contains('_Σ:') ||
+        !((b5['contents'] as String?) ?? '').contains('_μ:')) {
+      throw _F(
+          'Unsupported server workflow contract. Upgrade cascade_cli and the server together; no project files were written.');
+    }
+    for (final entry in {
+      'secretsEnvFile': 'cascade.secrets.env',
+      'secretsEnvExampleFile': 'cascade.secrets.env.example',
+      'secretsGuideFile': 'cascade.secrets.md'
+    }.entries) {
+      if (b3[entry.key] is! Map ||
+          b3[entry.key]['path'] != entry.value ||
+          b3[entry.key]['contents'] is! String) {
+        throw _F(
+            'Invalid server setup response. Upgrade CLI/server together; no files were written.');
+      }
+    }
     final b6 = q.join(a1, b4[$(46)] as String);
     final b7 = q.join(a1, b5[$(46)] as String);
     await Directory(q.dirname(b7)).create(recursive: true);
     await File(b6).writeAsString(b4[$(47)] as String);
-    await File(b7).writeAsString(b5[$(47)] as String);
+    final previous = File(b7);
+    if (previous.existsSync()) {
+      await previous.copy('$b7.pre-cascade-init.bak');
+      stdout.writeln(
+          'Saved previous Cascade-owned workflow to $b7.pre-cascade-init.bak.');
+    }
+    await previous.writeAsString(b5[$(47)] as String);
+    final refreshWorkflow = b3['refreshWorkflowFile'] as Map<String, dynamic>?;
+    if (refreshWorkflow != null) {
+      final refreshPath = refreshWorkflow['path'] as String;
+      if (refreshPath != '.github/workflows/cascade-refresh.yml') {
+        throw _F('Unexpected lifecycle workflow path.');
+      }
+      final companion = File(q.join(a1, refreshPath));
+      if (companion.existsSync()) {
+        await companion.copy('${companion.path}.pre-cascade-init.bak');
+      }
+      await companion.writeAsString(refreshWorkflow['contents'] as String);
+      stdout.writeln('Wrote $refreshPath — scoped lifecycle reader.');
+      stdout.writeln('Commit both generated files in .github/workflows/.');
+    }
     if (_h(a.a)) {
       stdout.writeln('');
       stdout.writeln('${$(191)}${a.a}${$(192)}');
@@ -340,8 +794,15 @@ class _C {
     var c1 = false;
     final c2 = _e(a1);
     if (b8 != null) {
-      final c3 = _f(b8[$(47)] as String, c2.$1);
-      c1 = _g(q.join(a1, b8[$(46)] as String), c3, false);
+      final c7 = q.join(a1, b8[$(46)] as String);
+      final c8 = File(c7).existsSync();
+      final c3 = _mergeSecretsEnv(
+        c8 ? File(c7).readAsStringSync() : null,
+        b8[$(47)] as String,
+        c2.$1,
+      );
+      File(c7).writeAsStringSync(c3);
+      c1 = !c8;
     }
     if (b9 != null) {
       await File(q.join(a1, b9[$(46)] as String))
@@ -421,13 +882,20 @@ class _D {
     final a1 = q.join(a0, $(58));
     final a2 = q.join(a0, $(59));
     stdout.writeln($(156));
+    if (a.d != null &&
+        (DateTime.tryParse(a.d!)?.isBefore(DateTime.now()) ?? true)) {
+      stdout.writeln('ERROR CLI login expired - run: cascade login');
+      exitCode = 1;
+    }
     if (a.b == null || a.b!.isEmpty) {
       stdout.writeln($(157));
+      exitCode = 1;
     } else {
       stdout.writeln('${$(158)}${a.c ?? $(159)}');
     }
     if (!File(q.join(a0, $(57))).existsSync()) {
       stdout.writeln($(160));
+      exitCode = 1;
     } else {
       stdout.writeln($(161));
     }
@@ -435,6 +903,7 @@ class _D {
     final a4 = File(a1);
     if (!a4.existsSync()) {
       stdout.writeln($(162));
+      exitCode = 1;
     } else {
       final a5 = a4.readAsStringSync();
       a3 = RegExp($(63), multiLine: true)
@@ -448,37 +917,86 @@ class _D {
       stdout.writeln($(163));
       if (a3 == null || !(a3.startsWith($(83)) || a3.startsWith($(84)))) {
         stdout.writeln($(164));
+        exitCode = 1;
         a3 = null;
       } else if (a3.startsWith($(83))) {
         stdout.writeln($(165));
       } else {
         stdout.writeln($(166));
+        exitCode = 1;
       }
     }
     final a6 = File(a2);
     if (!a6.existsSync()) {
       stdout.writeln($(167));
+      exitCode = 1;
     } else {
       final a7 = a6.readAsStringSync();
-      if (!a7.contains($(209)) || !a7.contains($(208)) || !a7.contains($(210))) {
+      if (!a7.contains($(209)) ||
+          !a7.contains($(208)) ||
+          !a7.contains($(210))) {
         stdout.writeln($(168));
+        exitCode = 1;
       } else {
-        stdout.writeln($(169));
+        final version = RegExp(r'_λ:\s*"([^"\r\n]+)"').firstMatch(a7)?.group(1);
+        if (version != supportedWorkflowVersion) {
+          stdout.writeln(
+              'ERROR workflow contract unsupported (expected $supportedWorkflowVersion) - run: dart pub global activate cascade_cli; cascade init');
+          exitCode = 1;
+        } else {
+          stdout.writeln('OK workflow contract: $supportedWorkflowVersion');
+          stdout.writeln($(169));
+        }
       }
     }
     await _c(a0, a3);
+    final refreshFile =
+        File(q.join(a0, '.github/workflows/cascade-refresh.yml'));
+    if (!refreshFile.existsSync() ||
+        !refreshFile.readAsStringSync().contains('workflow_call:')) {
+      stdout.writeln(
+          'ERROR lifecycle workflow missing or invalid - run: cascade init');
+      exitCode = 1;
+    } else {
+      stdout.writeln('OK lifecycle workflow: present');
+    }
     stdout.writeln($(170));
     stdout.writeln('${$(171)}${a.a}${$(172)}');
   }
 
   Future<void> _c(String a0, String? a1) async {
     stdout.writeln($(173));
+    if (!File(q.join(a0, 'cascade.secrets.env')).existsSync()) {
+      stdout.writeln('ERROR cascade.secrets.env missing - run: cascade init');
+      exitCode = 1;
+    }
     final a2 = <(String, String)>[];
     var a3 = $(218);
     if (a.b != null && a.b!.isNotEmpty && a1 != null) {
       try {
         final a4 = _G(a);
         final a5 = await a4.y('${$(24)}${Uri.encodeQueryComponent(a1)}');
+        if (a5['source'] == 'baseline') {
+          stdout
+              .writeln('ERROR App/project mismatch - run: cascade init --pick');
+          exitCode = 1;
+        }
+        if (a5['workflowVersion'] != supportedWorkflowVersion) {
+          stdout.writeln(
+              'ERROR server workflow contract differs - upgrade CLI/server together, then run: cascade init');
+          exitCode = 1;
+        }
+        final workflow = File(q.join(a0, '.github/workflows/cascade.yml'));
+        if (a5['issuedWorkflowVersion'] != supportedWorkflowVersion ||
+            !workflow.existsSync() ||
+            a5['issuedWorkflowChecksum'] !=
+                workflowChecksum(workflow.readAsStringSync())) {
+          stdout.writeln(
+              'ERROR workflow does not match the server-issued seal - run: cascade init');
+          exitCode = 1;
+        } else {
+          stdout.writeln('OK server-issued workflow seal verified');
+        }
         final a6 = a5[$(53)] as List?;
         if (a6 != null) {
           for (final a7 in a6) {
@@ -492,6 +1010,7 @@ class _D {
         a3 = (a5[$(56)] as String?) ?? a3;
       } catch (_) {
         stdout.writeln($(174));
+        exitCode = 1;
       }
     } else {
       stdout.writeln($(175));
@@ -502,10 +1021,17 @@ class _D {
     }
     stdout.writeln('${$(177)}$a3${$(203)}');
     final b0 = _b(a0);
+    final names = a2.map((p) => p.$1).toSet();
+    stdout.writeln(
+        'Android readiness: ${names.contains('ANDROID_KEYSTORE') ? 'signing required by enabled lanes' : 'no Android signing lane enabled'}');
+    stdout.writeln(
+        'iOS readiness: ${names.contains('MATCH_PASSWORD') ? 'signing required - setup: cascade match --ios' : 'no iOS lane enabled'}');
+    stdout.writeln("Lane requirements: ${a2.map((p) => p.$1).join(', ')}");
     if (!File(q.join(a0, $(60))).existsSync()) stdout.writeln($(178));
     final b1 = await _a();
     if (b1 == null) {
       stdout.writeln($(179));
+      exitCode = 1;
       stdout.writeln($(180));
     }
     var b2 = 0, b3 = 0, b4 = 0;
@@ -521,9 +1047,11 @@ class _D {
       } else {
         stdout.writeln('${$(227)}${b5.$1}${$(202)}${b5.$2}${$(183)}');
         b2++;
+        exitCode = 1;
         b3++;
       }
     }
+    if (b3 > 0) exitCode = 1;
     if (b4 > 0) {
       stdout.writeln($(184));
       stdout.writeln($(185));
@@ -538,23 +1066,8 @@ class _D {
   }
 
   Map<String, String> _b(String a0) {
-    final a1 = File(q.join(a0, $(60)));
-    if (!a1.existsSync()) return {};
-    final a2 = <String, String>{};
-    for (final a3 in a1.readAsStringSync().split('\n')) {
-      final a4 = a3.trim();
-      if (a4.isEmpty || a4.startsWith('#')) continue;
-      final a5 = a4.indexOf('=');
-      if (a5 <= 0) continue;
-      final a6 = a4.substring(0, a5).trim();
-      var a7 = a4.substring(a5 + 1).trim();
-      if ((a7.startsWith('"') && a7.endsWith('"')) ||
-          (a7.startsWith("'") && a7.endsWith("'"))) {
-        a7 = a7.substring(1, a7.length - 1);
-      }
-      if (a6.isNotEmpty && a7.isNotEmpty) a2[a6] = a7;
-    }
-    return a2;
+    final file = File(q.join(a0, 'cascade.secrets.env'));
+    return file.existsSync() ? _parseEnvMultiline(file.readAsStringSync()) : {};
   }
 
   Future<Set<String>?> _a() async {
@@ -603,8 +1116,7 @@ String? _j(String a0) {
     final a2 = File(a1);
     if (!a2.existsSync()) continue;
     final a3 = a2.readAsStringSync();
-    final a4 =
-        RegExp($(66)).firstMatch(a3) ?? RegExp($(67)).firstMatch(a3);
+    final a4 = RegExp($(66)).firstMatch(a3) ?? RegExp($(67)).firstMatch(a3);
     if (a4 != null) return a4.group(1);
   }
   return null;
@@ -654,19 +1166,19 @@ void _o(String a0) {
   }
 }
 
-void _d(String a0) {
-  final a1 = File(q.join(a0, $(61)));
-  final a2 = $(60);
-  if (!a1.existsSync()) {
-    a1.writeAsStringSync('${$(114)}$a2\n');
-    return;
+void _d(String root) {
+  final file = File(q.join(root, '.gitignore'));
+  var contents = file.existsSync() ? file.readAsStringSync() : '';
+  for (final pattern in [
+    'cascade.secrets.env',
+    '.github/workflows/*.pre-cascade-init.bak'
+  ]) {
+    if (!contents.split('\n').contains(pattern)) {
+      contents =
+          '$contents${contents.isEmpty || contents.endsWith('\n') ? '' : '\n'}$pattern\n';
+    }
   }
-  final a3 = a1.readAsStringSync();
-  if (RegExp('^${RegExp.escape(a2)}\\s*\$', multiLine: true).hasMatch(a3)) {
-    return;
-  }
-  final a4 = a3.endsWith('\n') ? '' : '\n';
-  a1.writeAsStringSync('$a3$a4\n${$(114)}$a2\n');
+  file.writeAsStringSync(contents);
 }
 
 bool _g(String a0, String a1, bool a2) {
@@ -674,6 +1186,112 @@ bool _g(String a0, String a1, bool a2) {
   if (!a2 && a3.existsSync()) return false;
   a3.writeAsStringSync(a1);
   return true;
+}
+
+/// Merge server template + autofill into existing secrets.env (preserve filled values).
+String _mergeSecretsEnv(
+  String? existing,
+  String template,
+  Map<String, String> autofill,
+) {
+  final a0 =
+      existing == null ? <String, String>{} : _parseEnvMultiline(existing);
+  final a1 = <String, String>{
+    for (final a2 in autofill.entries)
+      if ((a0[a2.key] ?? '').trim().isEmpty) a2.key: a2.value,
+  };
+  final a3 = <String, String>{
+    ...a1,
+    for (final a4 in a0.entries)
+      if (a4.value.trim().isNotEmpty) a4.key: a4.value,
+  };
+
+  final a5 = StringBuffer();
+  final a6 = template.replaceAll('\r\n', '\n').split('\n');
+  final a7 = <String>{};
+  for (var a8 = 0; a8 < a6.length; a8++) {
+    final a9 = a6[a8];
+    final b0 = a9.trim();
+    if (b0.isEmpty || b0.startsWith('#')) {
+      a5.writeln(a9);
+      continue;
+    }
+    final b1 = b0.indexOf('=');
+    if (b1 <= 0) {
+      a5.writeln(a9);
+      continue;
+    }
+    final b2 = b0.substring(0, b1).trim();
+    a7.add(b2);
+    final b3 = a3[b2];
+    if (b3 == null || b3.isEmpty) {
+      a5.writeln('$b2=');
+    } else if (b3.contains('\n') || b3.contains('"') || b3.contains("'")) {
+      a5.writeln(
+          '$b2="${b3.replaceAll(r'\', r'\\').replaceAll('"', r'\"').replaceAll('\n', r'\n')}"');
+    } else {
+      a5.writeln('$b2=$b3');
+    }
+  }
+  final b4 = a3.keys.where((k) => !a7.contains(k)).toList();
+  if (b4.isNotEmpty) {
+    a5.writeln('');
+    a5.writeln('# preserved from previous cascade.secrets.env');
+    for (final b5 in b4) {
+      final b6 = a3[b5]!;
+      if (b6.contains('\n') || b6.contains('"')) {
+        a5.writeln(
+            '$b5="${b6.replaceAll(r'\', r'\\').replaceAll('"', r'\"').replaceAll('\n', r'\n')}"');
+      } else {
+        a5.writeln('$b5=$b6');
+      }
+    }
+  }
+  return a5.toString();
+}
+
+Map<String, String> _parseEnvMultiline(String a0) {
+  final a1 = <String, String>{};
+  final a2 = a0.replaceAll('\r\n', '\n').split('\n');
+  String? a3;
+  final a4 = StringBuffer();
+  for (final a5 in a2) {
+    if (a3 != null) {
+      a4.writeln(a5);
+      final a6 = a5.trim();
+      if (a6.endsWith('"') || a6.endsWith("'")) {
+        var a7 = a4.toString().trim();
+        if ((a7.startsWith('"') && a7.endsWith('"')) ||
+            (a7.startsWith("'") && a7.endsWith("'"))) {
+          a7 = a7.substring(1, a7.length - 1);
+        }
+        a1[a3] = a7.replaceAll(r'\\n', '\n').replaceAll(r'\n', '\n');
+        a3 = null;
+        a4.clear();
+      }
+      continue;
+    }
+    final a8 = a5.trim();
+    if (a8.isEmpty || a8.startsWith('#')) continue;
+    final a9 = a8.indexOf('=');
+    if (a9 <= 0) continue;
+    final b0 = a8.substring(0, a9).trim();
+    var b1 = a8.substring(a9 + 1).trim();
+    if ((b1.startsWith('"') && !b1.endsWith('"')) ||
+        (b1.startsWith("'") && !b1.endsWith("'"))) {
+      a3 = b0;
+      a4.write(b1);
+      a4.writeln();
+      continue;
+    }
+    if ((b1.startsWith('"') && b1.endsWith('"')) ||
+        (b1.startsWith("'") && b1.endsWith("'"))) {
+      b1 = b1.substring(1, b1.length - 1);
+    }
+    b1 = b1.replaceAll(r'\\n', '\n').replaceAll(r'\n', '\n');
+    if (b0.isNotEmpty) a1[b0] = b1;
+  }
+  return a1;
 }
 
 bool _w(String? a0) {
@@ -778,4 +1396,62 @@ String _f(String a0, Map<String, String> a1) {
     );
   }
   return a2;
+}
+
+// Owner-authenticated initialization establishes trust before any CI credential is accepted.
+Future<Map<String, String>> _repositoryBinding() async {
+  if (!_I._hasGh()) {
+    throw _F(
+        'GitHub CLI missing. Install https://cli.github.com/, run gh auth login, then cascade init.');
+  }
+  final view =
+      await Process.run('gh', ['repo', 'view', '--json', 'nameWithOwner']);
+  if (view.exitCode != 0) {
+    throw _F(
+        'Sign in with gh auth login and initialize inside a GitHub repository.');
+  }
+  final name =
+      (jsonDecode(view.stdout as String) as Map)['nameWithOwner'] as String;
+  final response = await Process.run('gh', ['api', 'repos/$name']);
+  if (response.exitCode != 0) {
+    throw _F('Cannot inspect the GitHub repository. Check gh authentication.');
+  }
+  final repo = jsonDecode(response.stdout as String) as Map;
+  if ((repo['permissions'] as Map?)?['push'] != true) {
+    throw _F('Repository write access is required to bind Cascade.');
+  }
+  final ref = 'refs/heads/${repo['default_branch']}';
+  stdout.writeln(
+      'Binding Cascade releases to $name at $ref. PRs run validation only.');
+  return {
+    'repository': repo['full_name'] as String,
+    'repositoryId': repo['id'].toString(),
+    'ref': ref
+  };
+}
+
+Future<void> _sendLocalApk(_A config, ArgResults args) async {
+  if (config.b == null) throw _F('Run cascade login first.');
+  final file = args['file'] as String?;
+  final app = args['app'] as String?;
+  final to = args['to'] as String?;
+  if (file == null || app == null || to == null) {
+    throw _F(
+        'Use cascade send --app APP_ID --file app.apk --to you@example.com');
+  }
+  final artifact = File(file);
+  if (!artifact.existsSync() || artifact.lengthSync() > 200 * 1024 * 1024) {
+    throw _F('APK missing or larger than 200MB.');
+  }
+  final request = h.MultipartRequest(
+      'POST', Uri.parse('${config.a}/api/cli/apps/$app/artifacts'))
+    ..headers['Authorization'] = 'Bearer ${config.b}'
+    ..fields['notifyEmails'] = to
+    ..files.add(await h.MultipartFile.fromPath('file', file));
+  final response = await h.Response.fromStream(await request.send());
+  if (response.statusCode != 200) {
+    throw _F(
+        'Local delivery failed (${response.statusCode}). Check login, Email lane and APK file, then retry.');
+  }
+  stdout.writeln('APK delivered: ${jsonDecode(response.body)['downloadUrl']}');
 }

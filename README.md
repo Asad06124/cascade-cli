@@ -1,209 +1,118 @@
-# cascade_cli
+# Cascade CLI
 
-Official CLI for [Cascade](https://cascadeci.com) — sealed Flutter CI without putting store credentials in GitHub Actions YAML.
+Cascade builds, signs, uploads and submits Flutter releases through GitHub Actions. The dashboard shows separate execution and store status, safe failure explanations, release history and retained artifacts. Full build logs remain in GitHub Actions.
 
-Package: [`cascade_cli`](https://pub.dev/packages/cascade_cli) · Command: `cascade` · Site: [cascadeci.com](https://cascadeci.com)
+Package: `cascade_cli`. Executable: `cascade`. Candidate version: 0.1.17, compatible with workflow 2.2.0. The matching control plane must be deployed before the new package is published.
 
-```bash
+## Install and prerequisites
+
+Use Dart 3.5 or later, or Flutter with a compatible Dart SDK. Create an account at [Cascade](https://cascadeci.com/register), install [GitHub CLI](https://cli.github.com/), and authenticate it with `gh auth login`. Init requires a GitHub repository where you have write access; it binds release execution to that repository's default branch. Pull requests run validation only.
+
+```sh
 dart pub global activate cascade_cli
-cascade login
-cascade init
-cascade doctor
-```
-
----
-
-## What it does
-
-1. **Login** — device approval against cascadeci.com (token stored locally).
-2. **Init** — links your Flutter app, writes an opaque project seal, a sealed GitHub Actions workflow, and an opaque secrets guide.
-3. **Doctor** — checks login, project files, and basic readiness.
-
-Lanes (Play tracks, TestFlight, release modes) are toggled in the [dashboard](https://cascadeci.com). Closed lanes stay closed at plan time.
-
----
-
-## Requirements
-
-| Need | Why |
-|------|-----|
-| Dart SDK ≥ 3.5 (or Flutter SDK) | Run the CLI |
-| Account on [cascadeci.com](https://cascadeci.com) | Login + app linking |
-| Flutter app root | Where you run `cascade init` |
-| GitHub repo + Actions | Hosts the sealed workflow |
-| [`gh`](https://cli.github.com/) CLI | Push opaque secret slots |
-
----
-
-## Install
-
-```bash
-dart pub global activate cascade_cli
-```
-
-Ensure the pub global bin directory is on your `PATH` (Dart prints the path after activate). Then:
-
-```bash
+cascade --version
 cascade --help
 ```
 
-Upgrade later with the same activate command.
+Add the pub global bin directory to PATH if Dart requests it. Upgrade with the same activate command. Cascade uses https://cascadeci.com by default.
 
----
+## First project
 
-## Usage
-
-### 1. Create an account
-
-Sign up at [cascadeci.com](https://cascadeci.com) with a real email and complete OTP login in the browser. You do **not** need to create an app in the dashboard first — `cascade init` creates or links it.
-
-### 2. Login
-
-```bash
+```sh
 cascade login
-```
-
-Opens (or prints) a device-approval URL. After you approve in the browser, the CLI stores a token at:
-
-```text
-~/.cascade/config.json
-```
-
-Never commit that file. Re-run `cascade login` if the token expires or you switch machines.
-
-### 3. Init (Flutter app root)
-
-```bash
 cd /path/to/your_flutter_app
 cascade init
+# Fill cascade.secrets.env with values for the delivery lanes you want.
+cascade match
+# For Apple signing provisioning only, explicitly run:
+# cascade match --ios
 ```
 
-Typical first run:
+Enable the desired delivery lanes in [App settings](https://cascadeci.com/dashboard), then:
 
-- Detects `pubspec.yaml` / package name
-- Creates or reuses a matching Cascade app for your account
-- Writes project + workflow + secrets scaffolding
-
-**Flags**
-
-| Flag | Meaning |
-|------|---------|
-| `--new` | Force a brand-new Cascade app (skip reuse by package) |
-| `--pick` | Interactively pick an existing app when several match |
-| `--name MyApp` | Display name for a newly created app |
-
-Examples:
-
-```bash
-cascade init
-cascade init --name Roomround
-cascade init --pick
-cascade init --new --name ExperimentalBuild
-```
-
-### 4. Secrets (opaque slots)
-
-Init writes a local env draft and a markdown guide with **opaque slot names** (not plain GitHub secret key names in docs meant for reverse-engineering).
-
-1. Fill `cascade.secrets.env` (gitignored) with your real values.
-2. Follow `cascade.secrets.md` to push slots with `gh`.
-
-```bash
-gh auth login
-# then follow the commands listed in cascade.secrets.md
-```
-
-Do not invent secret names — use only the slots from the guide for your project.
-
-### 5. Commit what should be public
-
-```bash
-git add cascade.project.yaml \
-  .github/workflows/cascade.yml \
-  cascade.secrets.env.example \
-  cascade.secrets.md
-git commit -m "Add Cascade CI"
+```sh
+cascade doctor
+git add cascade.project.yaml .github/workflows/cascade.yml .github/workflows/cascade-refresh.yml cascade.secrets.env.example cascade.secrets.md .gitignore
+git commit -m "[build-apk] Configure Cascade"
 git push
 ```
 
-| File | Commit? |
-|------|---------|
-| `cascade.project.yaml` | Yes |
-| `.github/workflows/cascade.yml` | Yes (sealed — do not hand-edit) |
-| `cascade.secrets.env.example` | Yes |
-| `cascade.secrets.md` | Yes |
-| `cascade.secrets.env` | **No** |
-| `~/.cascade/config.json` | **No** |
+Doctor resolves required secrets from the enabled lanes, so enable those lanes before the final check. Watch the exact run in GitHub Actions and the App Release Control Center. Do not commit `cascade.secrets.env`, signing keys or `~/.cascade/config.json`.
 
-### 6. Doctor
+## Commands
 
-```bash
-cascade doctor
-```
+- `cascade login`: approve a device login in the browser. `cascade logout` clears the saved CLI session.
+- `cascade init`: create or link the App, bind the repository, and obtain current setup files from the authenticated server.
+- `cascade init --pick`: choose an existing App. `--new` creates a new App; `--name MyApp` sets the display name.
+- `cascade match`: push filled release/signing/notification values from the local secrets file into opaque GitHub secret slots using the generated guide's mapping. Unused values may stay empty. It does not upload status credentials to Cascade.
+- `cascade match --ios`: explicitly provision Apple signing with fastlane, then upload the signing configuration. Existing secret uploads are attempted before provisioning. Install fastlane on a Mac and configure the Apple API key, Match repository and team ID first.
+- `cascade doctor`: check login, Flutter project, project seal, both workflows, supported contract, server-issued workflow checksum, enabled lane requirements, local values and GitHub slot presence. It prints ASCII OK/WARN/ERROR and exits nonzero when required setup cannot be verified.
+- `cascade send --app APP_ID --file app-release.apk --to you@example.com`: deliver an existing APK through the enabled Email lane using your CLI session. This route does not require a GitHub workflow or store credentials.
+- `cascade --version` or `cascade version`: show package and workflow versions. `cascade --help` shows usage.
 
-Use this after login/init, or when CI misbehaves, to verify local config and project files.
+## Files and upgrades
 
-### 7. Trigger builds with git tags
+Init writes `cascade.project.yaml`, `.github/workflows/cascade.yml`, `.github/workflows/cascade-refresh.yml`, `cascade.secrets.env.example`, `cascade.secrets.md` and a gitignored `cascade.secrets.env`.
 
-Push a tag (optionally with an intent suffix). Exact tag rules live in your dashboard / secrets guide; common intents:
+Both workflows are wholly Cascade-owned, sealed files. Init repairs missing markers and upgrades the contract by regenerating them from the server. It saves previous copies as `.pre-cascade-init.bak`; review those backups for custom changes and keep independent custom jobs in separate workflow files. Other workflow files are untouched. Init preserves existing local secret values and adds missing keys. Each init rotates the project seal and issued workflow checksum, so idempotence means safe repeat setup rather than identical bytes. Commit the new project seal and both workflows together; avoid running init during an active release.
 
-| Tag intent | Typical outcome |
-|------------|-----------------|
-| *(plain version tag)* | APK + email delivery |
-| `[test-android-internal]` | Play internal testing |
-| `[test-android-closed]` | Play closed testing |
-| `[test-android-open]` | Play open testing |
-| `[test-ios]` | TestFlight |
-| `[build-apk]` | APK only |
-| `[build-ios]` | IPA only |
-| `[release-android-partial]` | Production partial rollout |
-| `[release-android-full]` | Production full rollout |
-| `[release-ios]` | App Store |
+The package does not bundle an older workflow template. The authenticated server returns version 2.2.0, a checksum and the companion lifecycle workflow; incompatible responses are rejected before files are written. The sealed bootstrap retrieves the current server-delivered runner bundle, including structured failure and release-result support. No monorepo checkout is needed by package users.
 
-Enable the matching lanes in the dashboard before you expect those paths to run.
+## Choose only the credentials you need
 
----
+Use the generated `cascade.secrets.md` and [public secrets guide](https://cascadeci.com/docs#secrets) for the current slot contract. Do not invent or rename slots.
 
-## Commands (quick reference)
+- APK/Android release builds require Android keystore, alias and passwords.
+- Play uploads additionally require the Play service account JSON and an existing configured application. Closed testing also requires `PLAY_CLOSED_TRACK` naming an existing closed track.
+- Email requires notification recipients; the Cascade operator configures the email service.
+- Signed iOS builds, TestFlight and App Store submission require Apple API credentials and Match signing configuration, including `MATCH_GIT_URL` and `IOS_TEAM_ID`. `IOS_SCHEME` defaults to Runner.
+- App Store submission additionally requires truthful `IOS_SUBMISSION_INFORMATION` and a complete listing. Submission uses manual release and does not fall back to TestFlight.
+
+Plain match does not start Apple provisioning merely because some Apple values are filled. Successful uploads remain if another upload fails; correct the reported names and rerun. Credentials stay in local configuration and GitHub Actions, never the provider-status vault.
+
+## Release intents
+
+Use a leading intent in the commit message with the corresponding enabled lane:
 
 ```text
-cascade login          Authenticate with cascadeci.com
-cascade init [flags]   Seal project + write workflow / secrets guide
-cascade doctor         Local health check
-cascade --help         Show help
+[build-apk]                       APK only
+[build-ios]                       signed IPA artifact
+[test-android-internal]           Play internal testing
+[test-android-closed]             named Play closed testing
+[test-android-open]               Play open testing
+[test-ios]                        internal TestFlight
+[release-android-partial]         production partial rollout
+[release-android-full]            production full rollout
+[release-ios]                     App Store review submission
 ```
 
----
+No intent defaults to APK and notification when the appropriate lanes are enabled. Disabled lanes are denied by the server's job plan. Upload or approval alone does not establish Live status.
 
-## Tips
+## Status and failure explanations
 
-- Prefer production (`https://cascadeci.com`). If an old config pointed at a dead localhost API, delete `~/.cascade/config.json` and run `cascade login` again — recent CLI versions ignore dead localhost and fall back to production.
-- Do not edit the sealed workflow by hand; re-run init or use the dashboard when features change.
-- Keep `gh` authenticated on the machine where you push secret slots.
-- For product docs and onboarding, see [cascadeci.com/guide](https://cascadeci.com/guide) and [cascadeci.com/docs](https://cascadeci.com/docs).
+Automatic status sync uses the Cascade GitHub workflow. Commit both workflows to the bound default branch and enable automatic status sync in App settings when the operator has configured the Cascade GitHub App. Manual scoped dispatch remains available when automatic dispatch is unavailable; use the command shown by the dashboard.
 
----
+Persisted status renders immediately. Android and iOS are evaluated independently. An automatic check becomes eligible 20 minutes after the last successful exact-current check, or when no successful check exists. Reloads inside that window do not start another check. Historical releases do not auto-refresh. Failures, backoff and provider/GitHub limits can delay retries; this is not constant polling or a background scan.
 
-## Support us
+Build Failed, Signing Failed, Upload Failed and Submission Failed describe execution outcomes. Processing Failed, In Review, Rejected, Live and Status refresh failed describe separate lifecycle or refresh outcomes. Cascade shows safe catalog reasons when reliable structured evidence exists; an opaque failure may have no precise root cause. Open GitHub Actions for full logs.
 
-Cascade and this CLI are maintained independently. Hosting the control plane, artifact delivery, email, and ongoing package upkeep have real costs — even when the CLI on pub.dev looks “just a small Dart package.”
+Cascade shows reviewer/rejection details only when official structured evidence exposes them. The current Google and Apple lifecycle readers do not expose detailed reviewer feedback. Open Google Play Console or App Store Connect for that detail.
 
-If Cascade helps you ship, and you want it to stay maintained, you can support the project:
+Direct Google/Apple status sync and provider-status credential uploads are unavailable in production. They are not part of this getting-started flow.
 
-- **Contact / donate:** [cascadeci.com/contact](https://cascadeci.com/contact) — mention **“Support Cascade”** or **donate** in the message
-- **Email:** [cascadeciofficial@gmail.com](mailto:cascadeciofficial@gmail.com?subject=Support%20Cascade)
+## Troubleshooting
 
-Any amount helps keep the package and service running for Flutter teams who rely on it. Thank you.
+- Missing markers, companion workflow, invalid project seal or checksum mismatch: run `cascade init`, then commit the project file and both workflows.
+- Unsupported workflow version: run `dart pub global activate cascade_cli`, then `cascade init` against the matching server.
+- Missing/expired login: run `cascade login`.
+- Missing GitHub CLI or authentication: install gh and run `gh auth login`.
+- Values filled locally but missing on GitHub: run `cascade match`.
+- Missing Apple signing setup: configure the listed Apple/Match values, then run `cascade match --ios` on a Mac.
+- Lane denied: enable the desired lane in App settings and rerun doctor before pushing.
+- Server unavailable: check connectivity and the configured API endpoint, then retry.
 
----
+## Links and license
 
-## Links
+[Guide](https://cascadeci.com/guide) · [Docs](https://cascadeci.com/docs) · [Support](https://cascadeci.com/support) · [Contact](https://cascadeci.com/contact) · [Package](https://pub.dev/packages/cascade_cli) · [Issues](https://github.com/Asad06124/cascade-cli/issues)
 
-- Site: [cascadeci.com](https://cascadeci.com)
-- pub.dev: [cascade_cli](https://pub.dev/packages/cascade_cli)
-- Issues: [GitHub issues](https://github.com/Asad06124/cascade-cli/issues)
-- Contact: [cascadeci.com/contact](https://cascadeci.com/contact)
-
-## License
-
-MIT
+Cascade is free. Support helps cover control-plane maintenance, email and storage. MIT license; see LICENSE.
