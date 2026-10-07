@@ -10,7 +10,7 @@ import 'package:path/path.dart' as q;
 
 part '_v.dart';
 
-const cliVersion = '0.1.18';
+const cliVersion = '0.1.20';
 const supportedWorkflowVersion = '2.2.0';
 String workflowChecksum(String contents) {
   final normalized = contents
@@ -414,7 +414,9 @@ class _I {
     final candidates = <String, Object>{};
     try {
       final google = values['PLAY_SERVICE_ACCOUNT_JSON']?.trim() ?? '';
-      if (google.isNotEmpty) candidates['google_play'] = jsonDecode(google);
+      if (google.isNotEmpty) {
+        candidates['google_play'] = _decodePlayServiceAccount(google);
+      }
     } catch (_) {
       stdout.writeln(
           'ERROR Automatic Android status updates: invalid Google Play configuration.');
@@ -1311,11 +1313,8 @@ String _mergeSecretsEnv(
     final b3 = a3[b2];
     if (b3 == null || b3.isEmpty) {
       a5.writeln('$b2=');
-    } else if (b3.contains('\n') || b3.contains('"') || b3.contains("'")) {
-      a5.writeln(
-          '$b2="${b3.replaceAll(r'\', r'\\').replaceAll('"', r'\"').replaceAll('\n', r'\n')}"');
     } else {
-      a5.writeln('$b2=$b3');
+      a5.write(_formatEnvAssignment(b2, b3));
     }
   }
   final b4 = a3.keys.where((k) => !a7.contains(k)).toList();
@@ -1323,17 +1322,26 @@ String _mergeSecretsEnv(
     a5.writeln('');
     a5.writeln('# preserved from previous cascade.secrets.env');
     for (final b5 in b4) {
-      final b6 = a3[b5]!;
-      if (b6.contains('\n') || b6.contains('"')) {
-        a5.writeln(
-            '$b5="${b6.replaceAll(r'\', r'\\').replaceAll('"', r'\"').replaceAll('\n', r'\n')}"');
-      } else {
-        a5.writeln('$b5=$b6');
-      }
+      a5.write(_formatEnvAssignment(b5, a3[b5]!));
     }
   }
   return a5.toString();
 }
+
+/// JSON objects stay raw (multiline OK). Other multiline/quoted values stay escaped.
+String _formatEnvAssignment(String key, String value) {
+  final trimmed = value.trim();
+  if (_looksLikeJsonObject(trimmed)) {
+    return '$key=$trimmed\n';
+  }
+  if (value.contains('\n') || value.contains('"') || value.contains("'")) {
+    return '$key="${value.replaceAll(r'\', r'\\').replaceAll('"', r'\"').replaceAll('\n', r'\n')}"\n';
+  }
+  return '$key=$value\n';
+}
+
+bool _looksLikeJsonObject(String value) =>
+    value.startsWith('{') && value.endsWith('}') && value.contains('"');
 
 Map<String, String> _parseEnvMultiline(String a0) {
   final a1 = <String, String>{};
@@ -1398,6 +1406,48 @@ String _envValue(String value) {
   final trimmed = value.trim();
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) return value;
   return value.replaceAll(r'\\n', '\n').replaceAll(r'\n', '\n');
+}
+
+/// Accept Google JSON as pasted, compact, or previously over-escaped by init merge.
+Object _decodePlayServiceAccount(String raw) {
+  try {
+    return jsonDecode(raw);
+  } catch (_) {}
+  var current = raw.trim();
+  for (var i = 0; i < 4; i++) {
+    current = _unescapeEnvString(current);
+    try {
+      final decoded = jsonDecode(current);
+      if (decoded is Map) return decoded;
+      if (decoded is String) {
+        current = decoded.trim();
+        continue;
+      }
+    } catch (_) {}
+  }
+  throw FormatException('invalid Google Play service account JSON');
+}
+
+String _unescapeEnvString(String value) {
+  final out = StringBuffer();
+  for (var i = 0; i < value.length; i++) {
+    final c = value[i];
+    if (c == r'\' && i + 1 < value.length) {
+      final next = value[i + 1];
+      if (next == 'n') {
+        out.write('\n');
+        i++;
+        continue;
+      }
+      if (next == '"' || next == r'\') {
+        out.write(next);
+        i++;
+        continue;
+      }
+    }
+    out.write(c);
+  }
+  return out.toString();
 }
 
 bool _jsonObjectClosed(String value) {

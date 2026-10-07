@@ -1,3 +1,9 @@
+## 0.1.20
+
+- Stop `cascade init` from re-escaping `PLAY_SERVICE_ACCOUNT_JSON` (that made the Play JSON look “modified” and then fail to parse).
+- Recover previously over-escaped Play JSON on `cascade match`.
+- Report package version `0.1.20` from `--version`.
+
 ## 0.1.19
 
 - Accept pasted multiline `PLAY_SERVICE_ACCOUNT_JSON` in `cascade.secrets.env` and keep JSON `\n` escapes intact so automatic Android status setup can parse the service account.
