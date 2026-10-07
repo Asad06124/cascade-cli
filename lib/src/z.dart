@@ -1339,19 +1339,25 @@ Map<String, String> _parseEnvMultiline(String a0) {
   final a1 = <String, String>{};
   final a2 = a0.replaceAll('\r\n', '\n').split('\n');
   String? a3;
+  var a3Json = false;
   final a4 = StringBuffer();
   for (final a5 in a2) {
     if (a3 != null) {
       a4.writeln(a5);
       final a6 = a5.trim();
-      if (a6.endsWith('"') || a6.endsWith("'")) {
+      final done = a3Json
+          ? _jsonObjectClosed(a4.toString())
+          : (a6.endsWith('"') || a6.endsWith("'"));
+      if (done) {
         var a7 = a4.toString().trim();
-        if ((a7.startsWith('"') && a7.endsWith('"')) ||
-            (a7.startsWith("'") && a7.endsWith("'"))) {
+        if (!a3Json &&
+            ((a7.startsWith('"') && a7.endsWith('"')) ||
+                (a7.startsWith("'") && a7.endsWith("'")))) {
           a7 = a7.substring(1, a7.length - 1);
         }
-        a1[a3] = a7.replaceAll(r'\\n', '\n').replaceAll(r'\n', '\n');
+        a1[a3] = _envValue(a7);
         a3 = null;
+        a3Json = false;
         a4.clear();
       }
       continue;
@@ -1365,6 +1371,15 @@ Map<String, String> _parseEnvMultiline(String a0) {
     if ((b1.startsWith('"') && !b1.endsWith('"')) ||
         (b1.startsWith("'") && !b1.endsWith("'"))) {
       a3 = b0;
+      a3Json = false;
+      a4.write(b1);
+      a4.writeln();
+      continue;
+    }
+    // Accept pasted Google JSON across lines: PLAY_SERVICE_ACCOUNT_JSON={\n ... }
+    if (b1 == '{' || (b1.startsWith('{') && !_jsonObjectClosed(b1))) {
+      a3 = b0;
+      a3Json = true;
       a4.write(b1);
       a4.writeln();
       continue;
@@ -1373,10 +1388,44 @@ Map<String, String> _parseEnvMultiline(String a0) {
         (b1.startsWith("'") && b1.endsWith("'"))) {
       b1 = b1.substring(1, b1.length - 1);
     }
-    b1 = b1.replaceAll(r'\\n', '\n').replaceAll(r'\n', '\n');
-    if (b0.isNotEmpty) a1[b0] = b1;
+    if (b0.isNotEmpty) a1[b0] = _envValue(b1);
   }
   return a1;
+}
+
+/// Keep JSON secrets intact; only expand escaped newlines for PEM / path values.
+String _envValue(String value) {
+  final trimmed = value.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return value;
+  return value.replaceAll(r'\\n', '\n').replaceAll(r'\n', '\n');
+}
+
+bool _jsonObjectClosed(String value) {
+  var depth = 0;
+  var inString = false;
+  var escape = false;
+  for (var i = 0; i < value.length; i++) {
+    final c = value[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (c == r'\') {
+        escape = true;
+      } else if (c == '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      inString = true;
+    } else if (c == '{') {
+      depth++;
+    } else if (c == '}') {
+      depth--;
+      if (depth == 0) return true;
+    }
+  }
+  return false;
 }
 
 bool _w(String? a0) {

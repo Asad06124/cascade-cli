@@ -1,3 +1,8 @@
+## 0.1.19
+
+- Accept pasted multiline `PLAY_SERVICE_ACCOUNT_JSON` in `cascade.secrets.env` and keep JSON `\n` escapes intact so automatic Android status setup can parse the service account.
+- PEM and other non-JSON secret values still expand escaped newlines as before.
+
 ## 0.1.18
 
 - Configure separate Android and iOS automatic status credentials through authenticated `cascade match` when the deployment supports it; build and signing secrets continue to upload to GitHub.
