@@ -2,7 +2,7 @@
 
 Cascade builds, signs, uploads and submits Flutter releases through GitHub Actions. The dashboard shows separate execution and store status, safe failure explanations, release history and retained artifacts. Full build logs remain in GitHub Actions.
 
-Package: `cascade_cli`. Executable: `cascade`. Candidate version: 0.1.17, compatible with workflow 2.2.0. The matching control plane must be deployed before the new package is published.
+Package: `cascade_cli`. Executable: `cascade`. Candidate version: 0.1.18, compatible with workflow 2.2.0. The matching control plane must be deployed before the new package is published.
 
 ## Install and prerequisites
 
@@ -44,9 +44,9 @@ Doctor resolves required secrets from the enabled lanes, so enable those lanes b
 - `cascade login`: approve a device login in the browser. `cascade logout` clears the saved CLI session.
 - `cascade init`: create or link the App, bind the repository, and obtain current setup files from the authenticated server.
 - `cascade init --pick`: choose an existing App. `--new` creates a new App; `--name MyApp` sets the display name.
-- `cascade match`: push filled release/signing/notification values from the local secrets file into opaque GitHub secret slots using the generated guide's mapping. Unused values may stay empty. It does not upload status credentials to Cascade.
+- `cascade match`: push filled release/signing/notification values from the local secrets file into opaque GitHub secret slots using the generated guide's mapping. Unused values may stay empty. It also sends the Google Play service account and/or App Store Connect API credential to Cascade’s authenticated status setup service. Signing keys/passwords are not included.
 - `cascade match --ios`: explicitly provision Apple signing with fastlane, then upload the signing configuration. Existing secret uploads are attempted before provisioning. Install fastlane on a Mac and configure the Apple API key, Match repository and team ID first.
-- `cascade doctor`: check login, Flutter project, project seal, both workflows, supported contract, server-issued workflow checksum, enabled lane requirements, local values and GitHub slot presence. It prints ASCII OK/WARN/ERROR and exits nonzero when required setup cannot be verified.
+- `cascade doctor`: check login, Flutter project, project seal, both workflows, supported contract, server-issued workflow checksum, enabled lane requirements, local values and GitHub slot presence. It also reports automatic Android/iOS status setup without displaying credentials. It prints ASCII OK/WARN/ERROR and exits nonzero when required setup cannot be verified.
 - `cascade send --app APP_ID --file app-release.apk --to you@example.com`: deliver an existing APK through the enabled Email lane using your CLI session. This route does not require a GitHub workflow or store credentials.
 - `cascade --version` or `cascade version`: show package and workflow versions. `cascade --help` shows usage.
 
@@ -68,7 +68,7 @@ Use the generated `cascade.secrets.md` and [public secrets guide](https://cascad
 - Signed iOS builds, TestFlight and App Store submission require Apple API credentials and Match signing configuration, including `MATCH_GIT_URL` and `IOS_TEAM_ID`. `IOS_SCHEME` defaults to Runner.
 - App Store submission additionally requires truthful `IOS_SUBMISSION_INFORMATION` and a complete listing. Submission uses manual release and does not fall back to TestFlight.
 
-Plain match does not start Apple provisioning merely because some Apple values are filled. Successful uploads remain if another upload fails; correct the reported names and rerun. Credentials stay in local configuration and GitHub Actions, never the provider-status vault.
+Plain match does not start Apple provisioning merely because some Apple values are filled. Successful uploads remain if another upload fails; correct the reported names and rerun. Release/signing values continue to go to GitHub Secrets. Only the Google Play and App Store Connect API credentials are also used for Cascade status access where enabled. Setup errors identify each affected provider; rerun match after fixing them. Unvalidated access is reported as pending, not complete.
 
 ## Release intents
 
@@ -90,7 +90,7 @@ No intent defaults to APK and notification when the appropriate lanes are enable
 
 ## Status and failure explanations
 
-Automatic status sync uses the Cascade GitHub workflow. Commit both workflows to the bound default branch and enable automatic status sync in App settings when the operator has configured the Cascade GitHub App. Manual scoped dispatch remains available when automatic dispatch is unavailable; use the command shown by the dashboard.
+Run `cascade match` to configure Google Play and App Store Connect status credentials. After successful validation, Cascade reads updated store records directly. No Connect/Authorize GitHub step is required for store status. GitHub remains responsible for builds, signing, uploads and submissions; commit both generated workflows for those operations.
 
 Persisted status renders immediately. Android and iOS are evaluated independently. An automatic check becomes eligible 20 minutes after the last successful exact-current check, or when no successful check exists. Reloads inside that window do not start another check. Historical releases do not auto-refresh. Failures, backoff and provider/GitHub limits can delay retries; this is not constant polling or a background scan.
 
@@ -98,7 +98,7 @@ Build Failed, Signing Failed, Upload Failed and Submission Failed describe execu
 
 Cascade shows reviewer/rejection details only when official structured evidence exposes them. The current Google and Apple lifecycle readers do not expose detailed reviewer feedback. Open Google Play Console or App Store Connect for that detail.
 
-Direct Google/Apple status sync and provider-status credential uploads are unavailable in production. They are not part of this getting-started flow.
+Only store-status credentials are copied to Cascade, encrypted at rest; signing secrets remain in GitHub. If no successful store upload has been recorded yet, status validation awaits an exact release target. Rerun `cascade match` after the first successful store upload. Failed refreshes keep the last known status.
 
 ## Troubleshooting
 

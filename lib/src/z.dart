@@ -10,7 +10,7 @@ import 'package:path/path.dart' as q;
 
 part '_v.dart';
 
-const cliVersion = '0.1.17';
+const cliVersion = '0.1.18';
 const supportedWorkflowVersion = '2.2.0';
 String workflowChecksum(String contents) {
   final normalized = contents
@@ -77,7 +77,7 @@ class Z {
       } else if (a4 == $(230)) {
         _H.x();
       } else if (a4 == $(234) || a4 == $(235) || a4 == $(253)) {
-        await _I.x([...a5, if (a2["ios"] == true) "--ios"]);
+        await _I.x([...a5, if (a2["ios"] == true) "--ios"], a6);
       } else if (a4 == "send") {
         await _sendLocalApk(a6, a2);
       } else if (a4 == $(71)) {
@@ -117,7 +117,7 @@ class Z {
 
   static void _u(ArgParser a0) {
     stdout.writeln(
-        "cascade match: upload filled secrets; --ios explicitly provisions Apple signing.\ncascade send --app APP_ID --file app-release.apk --to you@example.com: email a local APK link.");
+        "cascade match: configure release credentials and available automatic status access; --ios explicitly provisions Apple signing.\ncascade send --app APP_ID --file app-release.apk --to you@example.com: email a local APK link.");
     stdout.writeln(
         'cascade --version: show package and supported workflow versions.');
     stdout.write($(115));
@@ -279,12 +279,11 @@ class _H {
 
 /// Push filled release secrets to GitHub; Apple signing requires explicit --ios.
 class _I {
-  static Future<void> x(List<String> a0) async {
+  static Future<void> x(List<String> a0, _A config) async {
     stdout.writeln($(242));
     final a1 = Directory.current.path;
     final a2 = File(q.join(a1, $(60)));
     if (!a2.existsSync()) throw _F($(243));
-    if (!_hasGh()) throw _F($(249));
 
     var a3 = _parseEnvMultiline(a2.readAsStringSync());
     final a4 = a3[$(236)]?.trim() ?? '';
@@ -293,7 +292,20 @@ class _I {
     final bAll = a4.isNotEmpty && a5.isNotEmpty && a6.isNotEmpty;
     final setupIos = a0.contains("--ios");
     // Push existing credentials before optional Apple provisioning, so it cannot block Android setup.
-    await _pushSecrets(a1, a3);
+    final setupErrors = <String>[];
+    try {
+      if (!_hasGh()) throw _F($(249));
+      await _pushSecrets(a1, a3);
+    } catch (_) {
+      stdout.writeln(
+          'ERROR GitHub release configuration. Check gh access and rerun cascade match.');
+      setupErrors.add('GitHub release configuration');
+    }
+    setupErrors.addAll(await _configureStatus(a1, a3, config));
+    if (setupErrors.isNotEmpty) {
+      throw _F(
+          'Setup incomplete: ${setupErrors.join(', ')}. Fix the reported configuration and run cascade match again.');
+    }
     if (setupIos && !bAll) {
       final a7 = <String>[
         if (a4.isEmpty) $(236),
@@ -394,6 +406,116 @@ class _I {
     a3 = _parseEnvMultiline(a2.readAsStringSync());
     if (matchUrl != null) a3["MATCH_GIT_URL"] = matchUrl;
     if (setupIos) await _pushSecrets(a1, a3);
+  }
+
+  static Future<List<String>> _configureStatus(
+      String root, Map<String, String> values, _A config) async {
+    final errors = <String>[];
+    final candidates = <String, Object>{};
+    try {
+      final google = values['PLAY_SERVICE_ACCOUNT_JSON']?.trim() ?? '';
+      if (google.isNotEmpty) candidates['google_play'] = jsonDecode(google);
+    } catch (_) {
+      stdout.writeln(
+          'ERROR Automatic Android status updates: invalid Google Play configuration.');
+      errors.add('Android status updates');
+    }
+    final appleKey = values['APP_STORE_CONNECT_API_KEY']?.trim() ?? '';
+    if (appleKey.isNotEmpty) {
+      candidates['app_store_connect'] = {
+        'mode': 'team',
+        'keyId': values['APP_STORE_CONNECT_API_KEY_ID'] ?? '',
+        'issuerId': values['APP_STORE_CONNECT_API_ISSUER_ID'] ?? '',
+        'privateKey': _keyBody(root, appleKey),
+      };
+    }
+    if (candidates.isEmpty) return errors;
+    try {
+      if (config.b == null) throw _F('Run cascade login.');
+      final project = File(q.join(root, 'cascade.project.yaml'));
+      final binding = project.existsSync()
+          ? RegExp(r'^(?:cx|project_key):\s*(\S+)', multiLine: true)
+              .firstMatch(project.readAsStringSync())
+              ?.group(1)
+          : null;
+      if (binding == null) throw _F('Run cascade init.');
+      final api = _G(config);
+      final setup =
+          await api.z('/api/cli/apps/status-access', {'projectKey': binding});
+      if (setup['available'] != true) {
+        stdout.writeln(
+            'WARN Automatic status updates are unavailable on this deployment. Release setup is retained.');
+        return errors;
+      }
+      for (final entry in candidates.entries) {
+        final label = entry.key == 'google_play' ? 'Android' : 'iOS';
+        try {
+          for (final operation in ['configure', 'test']) {
+            final ticket = await api.z('/api/cli/apps/status-access', {
+              'projectKey': binding,
+              'provider': entry.key,
+              'operation': operation
+            });
+            final upload = Uri.parse(ticket['uploadUrl'] as String);
+            final local = _A._lb(config.a) &&
+                ['127.0.0.1', 'localhost', '::1'].contains(upload.host);
+            if ((upload.scheme != 'https' &&
+                    !(local && upload.scheme == 'http')) ||
+                upload.userInfo.isNotEmpty ||
+                upload.hasQuery ||
+                upload.hasFragment) {
+              throw _F('Invalid setup destination.');
+            }
+            final response = await h
+                .post(upload,
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Origin': Uri.parse(config.a).origin,
+                      'Authorization': 'Bearer ${ticket['authorization']}',
+                    },
+                    body: jsonEncode({
+                      'appId': ticket['appId'],
+                      'provider': entry.key,
+                      if (operation == 'configure') 'credential': entry.value
+                    }))
+                .timeout(const Duration(seconds: 30));
+            if (response.statusCode < 200 ||
+                response.statusCode >= 300 ||
+                response.bodyBytes.length > 8192) {
+              throw _F('Status setup failed.');
+            }
+            final result = jsonDecode(response.body) as Map<String, dynamic>;
+            if (operation == 'test' &&
+                !['accepted', 'limited'].contains(result['outcome'])) {
+              stdout.writeln(
+                  'WARN $label automatic status updates: saved, awaiting validation.');
+            } else if (operation == 'test') {
+              final checked = await api
+                  .z('/api/cli/apps/status-access', {'projectKey': binding});
+              final configured = (checked['providers'] as List? ?? []).any(
+                  (p) =>
+                      p is Map &&
+                      p['provider'] == entry.key &&
+                      p['configured'] == true);
+              stdout.writeln(configured
+                  ? 'OK $label automatic status updates'
+                  : 'WARN $label automatic status updates: saved, awaiting validation.');
+            }
+          }
+        } catch (_) {
+          stdout.writeln(
+              'ERROR Automatic $label status updates. Check the configuration, sign in again and rerun cascade match.');
+          errors.add('$label status updates');
+        }
+      }
+    } catch (_) {
+      stdout.writeln(
+          'ERROR Automatic status setup. Check Cascade login and project binding, then rerun cascade match.');
+      errors.add('Automatic status updates');
+    } finally {
+      candidates.clear();
+    }
+    return errors;
   }
 
   static Future<void> _pushSecrets(String a0, Map<String, String> a1) async {
@@ -569,48 +691,6 @@ class _I {
     }
     if (!a2.endsWith('\n')) a2 = '$a2\n';
     return a2;
-  }
-
-  static Map<String, String> _env(File a0) {
-    final a1 = <String, String>{};
-    final a2 = a0.readAsStringSync().split('\n');
-    String? a3;
-    final a4 = StringBuffer();
-    for (final a5 in a2) {
-      if (a3 != null) {
-        a4.writeln(a5);
-        if (a5.trim().endsWith('"') || a5.trim().endsWith("'")) {
-          var a6 = a4.toString().trim();
-          if ((a6.startsWith('"') && a6.endsWith('"')) ||
-              (a6.startsWith("'") && a6.endsWith("'"))) {
-            a6 = a6.substring(1, a6.length - 1);
-          }
-          a1[a3] = a6;
-          a3 = null;
-          a4.clear();
-        }
-        continue;
-      }
-      final a7 = a5.trim();
-      if (a7.isEmpty || a7.startsWith('#')) continue;
-      final a8 = a7.indexOf('=');
-      if (a8 <= 0) continue;
-      final a9 = a7.substring(0, a8).trim();
-      var b0 = a7.substring(a8 + 1).trim();
-      if ((b0.startsWith('"') && !b0.endsWith('"')) ||
-          (b0.startsWith("'") && !b0.endsWith("'"))) {
-        a3 = a9;
-        a4.write(b0);
-        a4.writeln();
-        continue;
-      }
-      if ((b0.startsWith('"') && b0.endsWith('"')) ||
-          (b0.startsWith("'") && b0.endsWith("'"))) {
-        b0 = b0.substring(1, b0.length - 1);
-      }
-      if (a9.isNotEmpty && b0.isNotEmpty) a1[a9] = b0;
-    }
-    return a1;
   }
 }
 
@@ -1008,6 +1088,18 @@ class _D {
           }
         }
         a3 = (a5[$(56)] as String?) ?? a3;
+        final status =
+            await a4.z('/api/cli/apps/status-access', {'projectKey': a1});
+        for (final item in (status['providers'] as List? ?? [])) {
+          if (item is Map) {
+            final label = item['provider'] == 'google_play' ? 'Android' : 'iOS';
+            stdout.writeln(item['configured'] == true
+                ? 'OK $label automatic status updates'
+                : status['available'] != true
+                    ? 'WARN $label automatic status updates unavailable on this deployment'
+                    : 'WARN $label automatic status updates not configured. Run: cascade match');
+          }
+        }
       } catch (_) {
         stdout.writeln($(174));
         exitCode = 1;
@@ -1179,13 +1271,6 @@ void _d(String root) {
     }
   }
   file.writeAsStringSync(contents);
-}
-
-bool _g(String a0, String a1, bool a2) {
-  final a3 = File(a0);
-  if (!a2 && a3.existsSync()) return false;
-  a3.writeAsStringSync(a1);
-  return true;
 }
 
 /// Merge server template + autofill into existing secrets.env (preserve filled values).
@@ -1385,17 +1470,6 @@ File? _u2(String a0, String? a1, String a2) {
     }
   } catch (_) {}
   return (a1, a2);
-}
-
-String _f(String a0, Map<String, String> a1) {
-  var a2 = a0;
-  for (final a3 in a1.entries) {
-    a2 = a2.replaceFirstMapped(
-      RegExp('^${RegExp.escape(a3.key)}=\\s*\$', multiLine: true),
-      (_) => '${a3.key}=${a3.value}',
-    );
-  }
-  return a2;
 }
 
 // Owner-authenticated initialization establishes trust before any CI credential is accepted.

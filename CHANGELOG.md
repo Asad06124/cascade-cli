@@ -1,3 +1,10 @@
+## 0.1.18
+
+- Configure separate Android and iOS automatic status credentials through authenticated `cascade match` when the deployment supports it; build and signing secrets continue to upload to GitHub.
+- Reuse unchanged status credentials, validate replacements before activation, and keep provider setup independent.
+- Report automatic status setup in `cascade doctor` without displaying credentials or internal identifiers.
+- Preserve explicit API overrides and workflow 2.2.0 compatibility. Requires the compatible control plane before publication.
+
 ## 0.1.17
 
 - Generate both current workflow 2.2 files from the authenticated Cascade server; reject incompatible responses before writing project files.
