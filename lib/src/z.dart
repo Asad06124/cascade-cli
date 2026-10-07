@@ -10,7 +10,7 @@ import 'package:path/path.dart' as q;
 
 part '_v.dart';
 
-const cliVersion = '0.1.20';
+const cliVersion = '0.1.21';
 const supportedWorkflowVersion = '2.2.0';
 String workflowChecksum(String contents) {
   final normalized = contents
@@ -504,15 +504,22 @@ class _I {
                   : 'WARN $label automatic status updates: saved, awaiting validation.');
             }
           }
-        } catch (_) {
+        } catch (error) {
+          final detail = error is _E || error is _F ? ' ${error.toString()}' : '';
           stdout.writeln(
-              'ERROR Automatic $label status updates. Check the configuration, sign in again and rerun cascade match.');
+              'ERROR Automatic $label status updates.$detail');
+          if (detail.isEmpty) {
+            stdout.writeln(
+                '   Run cascade login (required every 15 minutes for status credentials), then cascade match.');
+          }
           errors.add('$label status updates');
         }
       }
-    } catch (_) {
-      stdout.writeln(
-          'ERROR Automatic status setup. Check Cascade login and project binding, then rerun cascade match.');
+    } catch (error) {
+      final detail = error is _E || error is _F ? error.toString() : '';
+      stdout.writeln(detail.isNotEmpty
+          ? 'ERROR Automatic status setup. $detail'
+          : 'ERROR Automatic status setup. Run cascade login, then cascade match. Status credentials require a login from the last 15 minutes.');
       errors.add('Automatic status updates');
     } finally {
       candidates.clear();

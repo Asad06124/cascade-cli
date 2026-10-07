@@ -1,3 +1,7 @@
+## 0.1.21
+
+- Surface login/session errors during automatic status setup instead of a generic failure (status credentials need `cascade login` within the last 15 minutes).
+
 ## 0.1.20
 
 - Stop `cascade init` from re-escaping `PLAY_SERVICE_ACCOUNT_JSON` (that made the Play JSON look “modified” and then fail to parse).
