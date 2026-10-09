@@ -2,7 +2,7 @@
 
 Cascade builds, signs, uploads and submits Flutter releases through GitHub Actions. The dashboard shows separate execution and store status, safe failure explanations, release history and retained artifacts. Full build logs remain in GitHub Actions.
 
-Package: `cascade_cli`. Executable: `cascade`. Candidate version: 0.1.18, compatible with workflow 2.2.0. The matching control plane must be deployed before the new package is published.
+Package: `cascade_cli`. Executable: `cascade`. Candidate version: 0.1.23, compatible with workflow 2.2.0. The matching control plane must be deployed before the new package is published.
 
 ## Install and prerequisites
 
@@ -32,7 +32,7 @@ Enable the desired delivery lanes in [App settings](https://cascadeci.com/dashbo
 
 ```sh
 cascade doctor
-git add cascade.project.yaml .github/workflows/cascade.yml .github/workflows/cascade-refresh.yml cascade.secrets.env.example cascade.secrets.md .gitignore
+git add cascade.project.yaml .github/workflows/cascade.yml .github/workflows/cascade-refresh.yml cascade.secrets.env.example .gitignore
 git commit -m "[build-apk] Configure Cascade"
 git push
 ```
@@ -52,15 +52,15 @@ Doctor resolves required secrets from the enabled lanes, so enable those lanes b
 
 ## Files and upgrades
 
-Init writes `cascade.project.yaml`, `.github/workflows/cascade.yml`, `.github/workflows/cascade-refresh.yml`, `cascade.secrets.env.example`, `cascade.secrets.md` and a gitignored `cascade.secrets.env`.
+Init writes `cascade.project.yaml`, `.github/workflows/cascade.yml`, `.github/workflows/cascade-refresh.yml`, `cascade.secrets.env.example` and a gitignored `cascade.secrets.env`.
 
-Both workflows are wholly Cascade-owned, sealed files. Init repairs missing markers and upgrades the contract by regenerating them from the server. It saves previous copies as `.pre-cascade-init.bak`; review those backups for custom changes and keep independent custom jobs in separate workflow files. Other workflow files are untouched. Init preserves existing local secret values and adds missing keys. Each init rotates the project seal and issued workflow checksum, so idempotence means safe repeat setup rather than identical bytes. Commit the new project seal and both workflows together; avoid running init during an active release.
+Both workflows are wholly Cascade-owned, sealed files. Init repairs missing markers and upgrades the contract by regenerating them from the server. Init no longer creates workflow backups or a local Markdown secrets guide. Keep independent custom jobs in separate workflow files and use Git history to review generated workflow changes. Existing recovery files are left untouched. Other workflow files are untouched. Init preserves existing local secret values and adds missing keys. Each init rotates the project seal and issued workflow checksum, so idempotence means safe repeat setup rather than identical bytes. Commit the new project seal and both workflows together; avoid running init during an active release.
 
 The package does not bundle an older workflow template. The authenticated server returns version 2.2.0, a checksum and the companion lifecycle workflow; incompatible responses are rejected before files are written. The sealed bootstrap retrieves the current server-delivered runner bundle, including structured failure and release-result support. No monorepo checkout is needed by package users.
 
 ## Choose only the credentials you need
 
-Use the generated `cascade.secrets.md` and [public secrets guide](https://cascadeci.com/docs#secrets) for the current slot contract. Do not invent or rename slots.
+Use `cascade match` and the [public secrets guide](https://cascadeci.com/docs#secrets) for the current slot contract. Do not invent or rename slots.
 
 - APK/Android release builds require Android keystore, alias and passwords.
 - Play uploads additionally require the Play service account JSON and an existing configured application. Closed testing also requires `PLAY_CLOSED_TRACK` naming an existing closed track.
@@ -116,3 +116,9 @@ Only store-status credentials are copied to Cascade, encrypted at rest; signing 
 [Guide](https://cascadeci.com/guide) · [Docs](https://cascadeci.com/docs) · [Support](https://cascadeci.com/support) · [Contact](https://cascadeci.com/contact) · [Package](https://pub.dev/packages/cascade_cli) · [Issues](https://github.com/Asad06124/cascade-cli/issues)
 
 Cascade is free. Support helps cover control-plane maintenance, email and storage. MIT license; see LICENSE.
+
+## Encrypted lifecycle refresh
+
+The refresh companion uses opaque GitHub credential slots and an AES-256-GCM encrypted reader payload. Its separate decryption key is returned only after the server validates the scoped refresh request and GitHub OIDC identity. It does not receive the build workflow pack key. GitHub must still read the outer workflow triggers, permissions, jobs and dependency installation steps; these remain visible. Encryption hides the implementation in the committed file, but an authorized execution can decrypt it.
+
+Deploy the compatible Cascade server before updating the CLI, then run `cascade init` and commit both generated workflows together. `cascade match` now obtains secret slot mappings from the authenticated server instead of a local guide. Re-run init after workflow pack-key rotation. The safe example and active gitignored secrets file remain; init/match do not create `.bak-*` or `.mangled-*` secret copies.

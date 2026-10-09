@@ -1,3 +1,19 @@
+## 0.1.24
+
+- Stop creating workflow backups and `cascade.secrets.md`; keep the safe example and preserve active local credentials.
+- Fetch GitHub secret slot mappings from the authenticated server during match. Requires the compatible server update.
+- Generate an encrypted lifecycle refresh reader with opaque credential slots and a separate scoped key. Update server first, then re-run init and commit both workflows.
+
+## 0.1.23
+
+- Require login before `init`, `match`, and `send`; `help` / `--version` / `doctor` still run without forcing login.
+- Drop “re-login every 15 minutes” messaging for status setup — a normal CLI session lasts until logout (or session expiry).
+
+## 0.1.22
+
+- Keep GitHub secret upload successful when store-status validation fails; print actionable Android/iOS status warnings instead of a hard generic error.
+- Clarify invalid Apple `.p8` status keys and Google Play API/console access requirements.
+
 ## 0.1.21
 
 - Surface login/session errors during automatic status setup instead of a generic failure (status credentials need `cascade login` within the last 15 minutes).

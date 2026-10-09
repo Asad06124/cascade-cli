@@ -10,7 +10,7 @@ import 'package:path/path.dart' as q;
 
 part '_v.dart';
 
-const cliVersion = '0.1.21';
+const cliVersion = '0.1.24';
 const supportedWorkflowVersion = '2.2.0';
 String workflowChecksum(String contents) {
   final normalized = contents
@@ -77,10 +77,13 @@ class Z {
       } else if (a4 == $(230)) {
         _H.x();
       } else if (a4 == $(234) || a4 == $(235) || a4 == $(253)) {
+        _requireLogin(a6);
         await _I.x([...a5, if (a2["ios"] == true) "--ios"], a6);
       } else if (a4 == "send") {
+        _requireLogin(a6);
         await _sendLocalApk(a6, a2);
       } else if (a4 == $(71)) {
+        _requireLogin(a6);
         await _C(a6).x(a7);
       } else if (a4 == $(72)) {
         await _D(a6).x();
@@ -131,6 +134,16 @@ class _F implements Exception {
   final String a;
   @override
   String toString() => a;
+}
+
+void _requireLogin(_A config) {
+  if (config.b == null || config.b!.isEmpty) {
+    throw _F('Not logged in. Run: cascade login');
+  }
+  if (config.d != null &&
+      (DateTime.tryParse(config.d!)?.isBefore(DateTime.now()) ?? true)) {
+    throw _F('CLI login expired. Run: cascade login');
+  }
 }
 
 class _E implements Exception {
@@ -295,7 +308,7 @@ class _I {
     final setupErrors = <String>[];
     try {
       if (!_hasGh()) throw _F($(249));
-      await _pushSecrets(a1, a3);
+      await _pushSecrets(a1, a3, config);
     } catch (_) {
       stdout.writeln(
           'ERROR GitHub release configuration. Check gh access and rerun cascade match.');
@@ -405,7 +418,7 @@ class _I {
     final matchUrl = a3["MATCH_GIT_URL"];
     a3 = _parseEnvMultiline(a2.readAsStringSync());
     if (matchUrl != null) a3["MATCH_GIT_URL"] = matchUrl;
-    if (setupIos) await _pushSecrets(a1, a3);
+    if (setupIos) await _pushSecrets(a1, a3, config);
   }
 
   static Future<List<String>> _configureStatus(
@@ -481,16 +494,47 @@ class _I {
                       if (operation == 'configure') 'credential': entry.value
                     }))
                 .timeout(const Duration(seconds: 30));
-            if (response.statusCode < 200 ||
-                response.statusCode >= 300 ||
-                response.bodyBytes.length > 8192) {
+            if (response.bodyBytes.length > 8192) {
               throw _F('Status setup failed.');
             }
-            final result = jsonDecode(response.body) as Map<String, dynamic>;
+            Map<String, dynamic> result = const {};
+            try {
+              final decoded = jsonDecode(response.body);
+              if (decoded is Map<String, dynamic>) result = decoded;
+            } catch (_) {}
+            if (response.statusCode < 200 || response.statusCode >= 300) {
+              final code = result['code'] as String?;
+              if (operation == 'configure') {
+                if (entry.key == 'app_store_connect' &&
+                    (code == 'invalid' || response.statusCode == 400)) {
+                  stdout.writeln(
+                      'WARN iOS automatic status updates: Apple API key rejected for status reads.');
+                  stdout.writeln(
+                      '   Release secrets are still on GitHub. Use a raw AuthKey_*.p8 (EC P-256) for automatic iOS status.');
+                  break;
+                }
+                throw _F(code == 'unauthorized'
+                    ? 'Login expired or account access unavailable. Run cascade login and retry.'
+                    : 'Status credential upload failed${code != null ? ' ($code)' : ''}.');
+              }
+              // configure already succeeded earlier in this loop when test fails
+              stdout.writeln(
+                  'WARN $label automatic status updates: saved, but store validation failed${code != null ? ' ($code)' : ''}.');
+              if (entry.key == 'google_play') {
+                stdout.writeln(
+                    '   Enable Google Play Android Developer API and invite the service account to Play Console for this app package.');
+              }
+              break;
+            }
             if (operation == 'test' &&
                 !['accepted', 'limited'].contains(result['outcome'])) {
               stdout.writeln(
                   'WARN $label automatic status updates: saved, awaiting validation.');
+              if (entry.key == 'google_play' &&
+                  result['outcome'] == 'rejected') {
+                stdout.writeln(
+                    '   Check Play Console access for the service account and that Cascade has the correct Android package.');
+              }
             } else if (operation == 'test') {
               final checked = await api
                   .z('/api/cli/apps/status-access', {'projectKey': binding});
@@ -505,12 +549,11 @@ class _I {
             }
           }
         } catch (error) {
-          final detail = error is _E || error is _F ? ' ${error.toString()}' : '';
-          stdout.writeln(
-              'ERROR Automatic $label status updates.$detail');
+          final detail =
+              error is _E || error is _F ? ' ${error.toString()}' : '';
+          stdout.writeln('ERROR Automatic $label status updates.$detail');
           if (detail.isEmpty) {
-            stdout.writeln(
-                '   Run cascade login (required every 15 minutes for status credentials), then cascade match.');
+            stdout.writeln('   Run cascade login, then cascade match.');
           }
           errors.add('$label status updates');
         }
@@ -519,7 +562,7 @@ class _I {
       final detail = error is _E || error is _F ? error.toString() : '';
       stdout.writeln(detail.isNotEmpty
           ? 'ERROR Automatic status setup. $detail'
-          : 'ERROR Automatic status setup. Run cascade login, then cascade match. Status credentials require a login from the last 15 minutes.');
+          : 'ERROR Automatic status setup. Run cascade login, then cascade match.');
       errors.add('Automatic status updates');
     } finally {
       candidates.clear();
@@ -527,16 +570,48 @@ class _I {
     return errors;
   }
 
-  static Future<void> _pushSecrets(String a0, Map<String, String> a1) async {
-    final a2 = File(q.join(a0, $(314)));
-    if (!a2.existsSync()) throw _F($(319));
+  static Future<void> _pushSecrets(
+      String a0, Map<String, String> a1, _A config) async {
+    final project = File(q.join(a0, 'cascade.project.yaml'));
+    final binding = project.existsSync()
+        ? RegExp(r'^(?:cx|project_key):\s*(\S+)', multiLine: true)
+            .firstMatch(project.readAsStringSync())
+            ?.group(1)
+        : null;
+    if (config.b == null || binding == null) {
+      throw _F('Run cascade login and cascade init before cascade match.');
+    }
+    final status =
+        await _G(config).y('${$(24)}${Uri.encodeQueryComponent(binding)}');
+    final slots = status['slots'];
+    if (slots is! List || slots.isEmpty) {
+      throw _F(
+          'Secret slot lookup unavailable. Upgrade Cascade server and CLI together.');
+    }
+    final mappings = <String, String>{};
+    final names = <String>{};
+    for (final entry in slots) {
+      if (entry is! Map ||
+          entry['semantic'] is! String ||
+          entry['slot'] is! String) {
+        throw _F('Invalid secret slot lookup. No secrets uploaded.');
+      }
+      final semantic = entry['semantic'] as String;
+      final slot = entry['slot'] as String;
+      if (!RegExp(r'^[A-Z][A-Z0-9_]*$').hasMatch(semantic) ||
+          !RegExp(r'^c_[a-f0-9]{24}$').hasMatch(slot) ||
+          mappings.containsKey(semantic) ||
+          !names.add(slot)) {
+        throw _F('Invalid secret slot lookup. No secrets uploaded.');
+      }
+      mappings[semantic] = slot;
+    }
     stdout.write($(315));
-    final a3 = RegExp(r'gh secret set (\S+) --body "\$([A-Z0-9_]+)"');
     var a4 = 0;
     final failed = <String>[];
-    for (final a5 in a3.allMatches(a2.readAsStringSync())) {
-      final a6 = a5.group(1)!;
-      final a7 = a5.group(2)!;
+    for (final entry in mappings.entries) {
+      final a6 = entry.value;
+      final a7 = entry.key;
       var a8 = a1[a7]?.trim() ?? '';
       if (a8.isEmpty) continue;
       if (a7 == $(238)) a8 = _keyBody(a0, a8);
@@ -836,8 +911,7 @@ class _C {
     }
     for (final entry in {
       'secretsEnvFile': 'cascade.secrets.env',
-      'secretsEnvExampleFile': 'cascade.secrets.env.example',
-      'secretsGuideFile': 'cascade.secrets.md'
+      'secretsEnvExampleFile': 'cascade.secrets.env.example'
     }.entries) {
       if (b3[entry.key] is! Map ||
           b3[entry.key]['path'] != entry.value ||
@@ -851,11 +925,6 @@ class _C {
     await Directory(q.dirname(b7)).create(recursive: true);
     await File(b6).writeAsString(b4[$(47)] as String);
     final previous = File(b7);
-    if (previous.existsSync()) {
-      await previous.copy('$b7.pre-cascade-init.bak');
-      stdout.writeln(
-          'Saved previous Cascade-owned workflow to $b7.pre-cascade-init.bak.');
-    }
     await previous.writeAsString(b5[$(47)] as String);
     final refreshWorkflow = b3['refreshWorkflowFile'] as Map<String, dynamic>?;
     if (refreshWorkflow != null) {
@@ -864,9 +933,6 @@ class _C {
         throw _F('Unexpected lifecycle workflow path.');
       }
       final companion = File(q.join(a1, refreshPath));
-      if (companion.existsSync()) {
-        await companion.copy('${companion.path}.pre-cascade-init.bak');
-      }
       await companion.writeAsString(refreshWorkflow['contents'] as String);
       stdout.writeln('Wrote $refreshPath — scoped lifecycle reader.');
       stdout.writeln('Commit both generated files in .github/workflows/.');
@@ -879,7 +945,6 @@ class _C {
     }
     final b8 = b3[$(43)] as Map<String, dynamic>?;
     final b9 = b3[$(44)] as Map<String, dynamic>?;
-    final c0 = b3[$(45)] as Map<String, dynamic>?;
     var c1 = false;
     final c2 = _e(a1);
     if (b8 != null) {
@@ -896,10 +961,6 @@ class _C {
     if (b9 != null) {
       await File(q.join(a1, b9[$(46)] as String))
           .writeAsString(b9[$(47)] as String);
-    }
-    if (c0 != null) {
-      await File(q.join(a1, c0[$(46)] as String))
-          .writeAsString(c0[$(47)] as String);
     }
     _d(a1);
     final c4 = b3[$(48)] == true;
@@ -924,7 +985,6 @@ class _C {
       }
     }
     if (b9 != null) stdout.writeln('${$(126)}${b9[$(46)]}${$(130)}');
-    if (c0 != null) stdout.writeln('${$(126)}${c0[$(46)]}${$(131)}');
     stdout.writeln($(134));
     stdout.writeln($(135));
     stdout.writeln($(136));
@@ -1272,6 +1332,8 @@ void _d(String root) {
   var contents = file.existsSync() ? file.readAsStringSync() : '';
   for (final pattern in [
     'cascade.secrets.env',
+    'cascade.secrets.env.bak-*',
+    'cascade.secrets.env.mangled-*',
     '.github/workflows/*.pre-cascade-init.bak'
   ]) {
     if (!contents.split('\n').contains(pattern)) {
