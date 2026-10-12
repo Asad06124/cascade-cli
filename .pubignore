@@ -10,5 +10,4 @@ pubspec.lock
 .gitignore
 .pubignore
 docs/
-../../
-../../../
+analysis_options.yaml

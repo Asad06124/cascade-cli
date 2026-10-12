@@ -1,3 +1,10 @@
+## 0.1.25
+
+- Correct the signing-skipped message: plain match uploads credentials; signing setup requires --ios.
+- Detect missing Apple team and unique custom shared scheme from Xcode; keep Runner as the default.
+- Reuse an existing Matchfile/signing repository, respect explicit overrides, and persist the repository URL created by --ios before uploading it.
+- Omit automatically detected signing settings from fresh env templates; review answers and named Play tracks remain lane-specific.
+
 ## 0.1.24
 
 - Stop creating workflow backups and `cascade.secrets.md`; keep the safe example and preserve active local credentials.

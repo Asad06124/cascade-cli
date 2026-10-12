@@ -2,7 +2,7 @@
 
 Cascade builds, signs, uploads and submits Flutter releases through GitHub Actions. The dashboard shows separate execution and store status, safe failure explanations, release history and retained artifacts. Full build logs remain in GitHub Actions.
 
-Package: `cascade_cli`. Executable: `cascade`. Candidate version: 0.1.23, compatible with workflow 2.2.0. The matching control plane must be deployed before the new package is published.
+Package: `cascade_cli`. Executable: `cascade`. Candidate version: 0.1.25, compatible with workflow 2.2.0. The matching control plane must be deployed before the new package is published.
 
 ## Install and prerequisites
 
@@ -122,3 +122,25 @@ Cascade is free. Support helps cover control-plane maintenance, email and storag
 The refresh companion uses opaque GitHub credential slots and an AES-256-GCM encrypted reader payload. Its separate decryption key is returned only after the server validates the scoped refresh request and GitHub OIDC identity. It does not receive the build workflow pack key. GitHub must still read the outer workflow triggers, permissions, jobs and dependency installation steps; these remain visible. Encryption hides the implementation in the committed file, but an authorized execution can decrypt it.
 
 Deploy the compatible Cascade server before updating the CLI, then run `cascade init` and commit both generated workflows together. `cascade match` now obtains secret slot mappings from the authenticated server instead of a local guide. Re-run init after workflow pack-key rotation. The safe example and active gitignored secrets file remain; init/match do not create `.bak-*` or `.mangled-*` secret copies.
+
+## Automatic iOS configuration
+
+Plain `cascade match` uploads filled credentials and reuses an existing signing
+repository from `ios/Matchfile` or `ios/fastlane/Matchfile`. It detects one
+unambiguous `DEVELOPMENT_TEAM` in `ios/Runner.xcodeproj/project.pbxproj` and a
+unique custom shared scheme. `Runner` already defaults automatically. Explicit
+`MATCH_GIT_URL`, `IOS_TEAM_ID` and `IOS_SCHEME` env values take precedence.
+Fresh env templates omit those automatic fields; add an override only when
+needed. Existing files and overrides are preserved.
+
+Run `cascade match --ios` explicitly to prepare certificates/profiles. It reuses
+your signing repository or creates private storage when none is configured,
+saves its URL to the active gitignored env file, and uploads it to GitHub.
+Missing/ambiguous team or scheme configuration is reported rather than guessed.
+Normal `match` never creates signing repositories or Apple certificates.
+
+TestFlight does not need `IOS_SUBMISSION_INFORMATION`. App Store review does;
+provide truthful app-specific compliance answers and complete the Apple listing.
+`PLAY_CLOSED_TRACK` is only for a named closed Play track. An iOS status message
+of “saved, awaiting validation” concerns lifecycle validation, not empty API keys
+or certificate setup; it is separate from signing preparation.

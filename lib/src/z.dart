@@ -10,7 +10,7 @@ import 'package:path/path.dart' as q;
 
 part '_v.dart';
 
-const cliVersion = '0.1.24';
+const cliVersion = '0.1.25';
 const supportedWorkflowVersion = '2.2.0';
 String workflowChecksum(String contents) {
   final normalized = contents
@@ -299,6 +299,7 @@ class _I {
     if (!a2.existsSync()) throw _F($(243));
 
     var a3 = _parseEnvMultiline(a2.readAsStringSync());
+    _inferIosSettings(a1, a2, a3);
     final a4 = a3[$(236)]?.trim() ?? '';
     final a5 = a3[$(237)]?.trim() ?? '';
     var a6 = a3[$(238)]?.trim() ?? '';
@@ -345,10 +346,23 @@ class _I {
       final a9 = _i(a1);
       if (a9 == null || a9.isEmpty) throw _F($(288));
 
-      final b0 = await _certsUrl(a1);
+      final team = a3['IOS_TEAM_ID']?.trim() ?? '';
+      if (!RegExp(r'^[A-Z0-9]{10}$').hasMatch(team)) {
+        throw _F(
+            'Cannot determine the Apple team. Set IOS_TEAM_ID from Apple Developer Membership details or configure one DEVELOPMENT_TEAM in Xcode.');
+      }
+      final schemes = _sharedIosSchemes(a1);
+      if ((a3['IOS_SCHEME']?.trim() ?? '').isEmpty &&
+          !schemes.contains('Runner') &&
+          schemes.length > 1) {
+        throw _F(
+            'Multiple shared iOS schemes found. Set IOS_SCHEME to the intended app scheme.');
+      }
+      final b0 = await _certsUrl(a1, a3['MATCH_GIT_URL']);
       a3['MATCH_GIT_URL'] = b0;
+      _upsertEnv(a2, 'MATCH_GIT_URL', b0);
       stdout.writeln('${$(264)}$b0');
-      _writeMatchfile(a8, b0, a9);
+      _writeMatchfile(a8, b0, a9, team);
       stdout.write($(265));
 
       final b1 = _ensurePassword(a2, a3);
@@ -379,6 +393,9 @@ class _I {
         ..[$(285)] = $(287)
         ..[$(286)] = $(287)
         ..[$(301)] = b6;
+      b3['IOS_TEAM_ID'] = team;
+      b3['FASTLANE_TEAM_ID'] = team;
+      b3['MATCH_GIT_URL'] = b0;
 
       final b7 = q.join(a8, $(298));
       Directory(b7).createSync(recursive: true);
@@ -670,13 +687,82 @@ class _I {
     return a1;
   }
 
-  static Future<String> _certsUrl(String a0) async {
-    final a1 = File(q.join(a0, $(240), $(241)));
-    if (a1.existsSync()) {
-      final a2 =
-          RegExp(r'git_url\("([^"]+)"\)').firstMatch(a1.readAsStringSync());
-      if (a2 != null) return a2.group(1)!;
+  static Set<String> _sharedIosSchemes(String root) {
+    final ios = Directory(q.join(root, 'ios'));
+    if (!ios.existsSync()) return {};
+    final schemes = <String>{};
+    for (final project in ios.listSync().whereType<Directory>()) {
+      if (!project.path.endsWith('.xcodeproj') &&
+          !project.path.endsWith('.xcworkspace')) {
+        continue;
+      }
+      final shared =
+          Directory(q.join(project.path, 'xcshareddata', 'xcschemes'));
+      if (!shared.existsSync()) continue;
+      for (final file in shared.listSync().whereType<File>()) {
+        if (file.path.endsWith('.xcscheme')) {
+          schemes.add(q.basenameWithoutExtension(file.path));
+        }
+      }
     }
+    return schemes;
+  }
+
+  static String? _existingMatchUrl(String root) {
+    for (final relative in ['ios/Matchfile', 'ios/fastlane/Matchfile']) {
+      final file = File(q.join(root, relative));
+      if (!file.existsSync()) continue;
+      final match = RegExp(r'''^\s*git_url\s*(?:\(\s*)?["']([^"'\r\n]+)["']''',
+              multiLine: true)
+          .firstMatch(file.readAsStringSync());
+      if (match != null) {
+        final value = match.group(1)!;
+        if (!value.contains(r'#{') &&
+            !value.contains(r'$(') &&
+            !value.contains(r'${')) {
+          return value;
+        }
+      }
+    }
+    return null;
+  }
+
+  static void _inferIosSettings(
+      String root, File envFile, Map<String, String> values) {
+    void remember(String key, String? value) {
+      if ((values[key]?.trim() ?? '').isNotEmpty ||
+          value == null ||
+          value.isEmpty) {
+        return;
+      }
+      values[key] = value;
+      _upsertEnv(envFile, key, value);
+      stdout.writeln('OK $key detected from existing iOS configuration.');
+    }
+
+    remember('MATCH_GIT_URL', _existingMatchUrl(root));
+    final project =
+        File(q.join(root, 'ios', 'Runner.xcodeproj', 'project.pbxproj'));
+    if (project.existsSync()) {
+      final teams = RegExp(r'DEVELOPMENT_TEAM\s*=\s*"?([A-Z0-9]{10})"?\s*;')
+          .allMatches(project.readAsStringSync())
+          .map((m) => m.group(1)!)
+          .toSet();
+      if (teams.length == 1) remember('IOS_TEAM_ID', teams.single);
+    }
+    final schemes = _sharedIosSchemes(root);
+    // Runner already has a standard runner-side default: no env entry needed.
+    if (!schemes.contains('Runner') && schemes.length == 1) {
+      remember('IOS_SCHEME', schemes.single);
+    }
+  }
+
+  static Future<String> _certsUrl(String a0, String? configured) async {
+    if (configured != null && configured.trim().isNotEmpty) {
+      return configured.trim();
+    }
+    final existing = _existingMatchUrl(a0);
+    if (existing != null) return existing;
     final a3 = await _ghLogin();
     final a4 =
         (_n(a0) ?? $(69)).toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-');
@@ -699,9 +785,9 @@ class _I {
     return a6;
   }
 
-  static void _writeMatchfile(String a0, String a1, String a2) {
-    File(q.join(a0, $(241)))
-        .writeAsStringSync('${$(289)}$a1${$(290)}$a2${$(291)}');
+  static void _writeMatchfile(String a0, String a1, String a2, String team) {
+    File(q.join(a0, $(241))).writeAsStringSync(
+        '${$(289)}$a1${$(290)}$a2${$(291)}team_id(${jsonEncode(team)})\n');
   }
 
   static String _ensurePassword(File a0, Map<String, String> a1) {
