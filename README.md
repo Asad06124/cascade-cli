@@ -2,7 +2,7 @@
 
 Cascade builds, signs, uploads and submits Flutter releases through GitHub Actions. The dashboard shows separate execution and store status, safe failure explanations, release history and retained artifacts. Full build logs remain in GitHub Actions.
 
-Package: `cascade_cli`. Executable: `cascade`. Candidate version: 0.1.25, compatible with workflow 2.2.0. The matching control plane must be deployed before the new package is published.
+Package: `cascade_cli`. Executable: `cascade`. Candidate version: 0.1.26, compatible with workflow 2.2.0. The matching control plane must be deployed before the new package is published.
 
 ## Install and prerequisites
 

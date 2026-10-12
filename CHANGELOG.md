@@ -1,3 +1,7 @@
+## 0.1.26
+
+- Plain match recognizes complete iOS signing configuration and no longer recommends repeating --ios. Store-status validation remains automatic and independent of signing.
+
 ## 0.1.25
 
 - Correct the signing-skipped message: plain match uploads credentials; signing setup requires --ios.

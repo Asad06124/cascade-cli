@@ -10,7 +10,7 @@ import 'package:path/path.dart' as q;
 
 part '_v.dart';
 
-const cliVersion = '0.1.25';
+const cliVersion = '0.1.26';
 const supportedWorkflowVersion = '2.2.0';
 String workflowChecksum(String contents) {
   final normalized = contents
@@ -428,7 +428,10 @@ class _I {
         throw _F($(311));
       }
       stdout.writeln($(252));
-    } else {
+    } else if (bAll && ['MATCH_PASSWORD', 'MATCH_GIT_AUTH', 'MATCH_GIT_URL', 'IOS_TEAM_ID']
+        .every((key) => (a3[key]?.trim() ?? '').isNotEmpty)) {
+      stdout.writeln('OK iOS signing configuration present. CI will reuse the existing signing material.');
+    } else if (a4.isNotEmpty || a5.isNotEmpty || a6.isNotEmpty) {
       stdout.write($(318));
     }
 
